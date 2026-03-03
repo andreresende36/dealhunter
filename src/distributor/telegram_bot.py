@@ -8,7 +8,7 @@ import asyncio
 from typing import Optional
 
 import structlog
-from telegram import Bot, InputMediaPhoto
+from telegram import Bot
 from telegram.error import RetryAfter, TelegramError
 from telegram.constants import ParseMode
 

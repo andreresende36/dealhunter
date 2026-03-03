@@ -3,16 +3,17 @@ Testes para o Score Engine do DealHunter.
 """
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from src.scraper.base_scraper import ScrapedProduct
-from src.analyzer.score_engine import ScoreEngine, ScoreBreakdown
+from src.analyzer.score_engine import ScoreEngine
 from src.analyzer.fake_discount_detector import FakeDiscountDetector
 
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def mock_settings():
@@ -59,7 +60,7 @@ def bad_product() -> ScrapedProduct:
         url="http://ml.com/p/MLB222",
         title="Camiseta",
         price=99.90,
-        original_price=None,   # Sem desconto
+        original_price=None,  # Sem desconto
         rating=3.0,
         review_count=2,
         free_shipping=False,
@@ -70,6 +71,7 @@ def bad_product() -> ScrapedProduct:
 # ---------------------------------------------------------------------------
 # Score Engine — pontuações individuais
 # ---------------------------------------------------------------------------
+
 
 class TestScoreEngine:
     def test_great_product_passes(self, engine, great_product):
@@ -129,7 +131,10 @@ class TestScoreEngine:
         )
         result = engine.evaluate(bad_product)
         assert result.passed is False
-        assert "desconto" in result.reject_reason.lower() or result.reject_reason is not None
+        assert (
+            "desconto" in result.reject_reason.lower()
+            or result.reject_reason is not None
+        )
 
     def test_batch_returns_sorted_by_score(self, engine, great_product, bad_product):
         # Adicionar desconto mínimo ao bad_product para só testar ordenação
@@ -151,6 +156,7 @@ class TestScoreEngine:
 # ---------------------------------------------------------------------------
 # Fake Discount Detector
 # ---------------------------------------------------------------------------
+
 
 class TestFakeDiscountDetector:
     def setup_method(self):

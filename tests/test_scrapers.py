@@ -7,17 +7,15 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.scraper.base_scraper import BaseScraper, ScrapedProduct, USER_AGENTS
-from src.scraper.ofertas_do_dia import (
-    CaptchaError,
-    OfertasDoDiaScraper,
-    RateLimitError,
-)
+from bs4 import Tag
+from src.scraper.ofertas_do_dia import OfertasDoDiaScraper
 from src.scraper.categoria_moda import CategoriaModaScraper
 
 
 # ---------------------------------------------------------------------------
 # Fixtures — HTML mockado com seletores poly- (estrutura atual do ML)
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def sample_product() -> ScrapedProduct:
@@ -212,6 +210,7 @@ def _make_scraper() -> OfertasDoDiaScraper:
 # ScrapedProduct — testes unitários do dataclass
 # ===========================================================================
 
+
 class TestScrapedProduct:
     def test_discount_pct_calculated(self):
         p = ScrapedProduct(
@@ -267,6 +266,7 @@ class TestScrapedProduct:
 # OfertasDoDiaScraper — extração de ML ID
 # ===========================================================================
 
+
 class TestExtractMlId:
     def setup_method(self):
         self.scraper = _make_scraper()
@@ -297,6 +297,7 @@ class TestExtractMlId:
 # ===========================================================================
 # OfertasDoDiaScraper — clean_price
 # ===========================================================================
+
 
 class TestCleanPrice:
     def setup_method(self):
@@ -331,6 +332,7 @@ class TestCleanPrice:
 # OfertasDoDiaScraper — parse_discount_pct
 # ===========================================================================
 
+
 class TestParseDiscountPct:
     def setup_method(self):
         self.scraper = _make_scraper()
@@ -355,6 +357,7 @@ class TestParseDiscountPct:
 # OfertasDoDiaScraper — price_from_andes
 # ===========================================================================
 
+
 class TestPriceFromAndes:
     def setup_method(self):
         self.scraper = _make_scraper()
@@ -364,9 +367,7 @@ class TestPriceFromAndes:
 
         cents_html = ""
         if cents is not None:
-            cents_html = (
-                f'<span class="andes-money-amount__cents">{cents}</span>'
-            )
+            cents_html = f'<span class="andes-money-amount__cents">{cents}</span>'
         html = f"""
         <span class="andes-money-amount">
           <span class="andes-money-amount__fraction">{fraction}</span>
@@ -407,6 +408,7 @@ class TestPriceFromAndes:
 # ===========================================================================
 # OfertasDoDiaScraper — parsing de página completa (poly- selectors)
 # ===========================================================================
+
 
 class TestParsePagePoly:
     def setup_method(self):
@@ -463,6 +465,7 @@ class TestParsePagePoly:
 # OfertasDoDiaScraper — parsing com seletores legados (fallback)
 # ===========================================================================
 
+
 class TestParsePageLegacy:
     def setup_method(self):
         self.scraper = _make_scraper()
@@ -481,6 +484,7 @@ class TestParsePageLegacy:
 # ===========================================================================
 # OfertasDoDiaScraper — deduplicação com mock de StorageManager
 # ===========================================================================
+
 
 class TestDeduplication:
     @pytest.mark.asyncio
@@ -511,9 +515,7 @@ class TestDeduplication:
             patch.object(
                 scraper, "_new_page", new_callable=AsyncMock, return_value=mock_page
             ),
-            patch.object(
-                scraper, "_goto", new_callable=AsyncMock, return_value=True
-            ),
+            patch.object(scraper, "_goto", new_callable=AsyncMock, return_value=True),
             patch.object(scraper, "_human_scroll", new_callable=AsyncMock),
             patch.object(scraper, "_random_delay", new_callable=AsyncMock),
             patch.object(
@@ -550,9 +552,7 @@ class TestDeduplication:
             patch.object(
                 scraper, "_new_page", new_callable=AsyncMock, return_value=mock_page
             ),
-            patch.object(
-                scraper, "_goto", new_callable=AsyncMock, return_value=True
-            ),
+            patch.object(scraper, "_goto", new_callable=AsyncMock, return_value=True),
             patch.object(scraper, "_human_scroll", new_callable=AsyncMock),
             patch.object(scraper, "_random_delay", new_callable=AsyncMock),
             patch.object(
@@ -567,6 +567,7 @@ class TestDeduplication:
 # ===========================================================================
 # OfertasDoDiaScraper — retry e error handling
 # ===========================================================================
+
 
 class TestRetryAndErrors:
     @pytest.mark.asyncio
@@ -586,9 +587,7 @@ class TestRetryAndErrors:
             patch.object(
                 scraper, "_new_page", new_callable=AsyncMock, return_value=mock_page
             ),
-            patch.object(
-                scraper, "_goto", new_callable=AsyncMock, return_value=True
-            ),
+            patch.object(scraper, "_goto", new_callable=AsyncMock, return_value=True),
             patch.object(
                 scraper, "_is_blocked", new_callable=AsyncMock, return_value=True
             ),
@@ -616,9 +615,7 @@ class TestRetryAndErrors:
             patch.object(
                 scraper, "_new_page", new_callable=AsyncMock, return_value=mock_page
             ),
-            patch.object(
-                scraper, "_goto", new_callable=AsyncMock, return_value=False
-            ),
+            patch.object(scraper, "_goto", new_callable=AsyncMock, return_value=False),
             patch.object(
                 scraper, "_is_blocked", new_callable=AsyncMock, return_value=False
             ),
@@ -644,9 +641,7 @@ class TestRetryAndErrors:
             patch.object(
                 scraper, "_new_page", new_callable=AsyncMock, return_value=mock_page
             ),
-            patch.object(
-                scraper, "_goto", new_callable=AsyncMock, return_value=True
-            ),
+            patch.object(scraper, "_goto", new_callable=AsyncMock, return_value=True),
             patch.object(
                 scraper, "_is_blocked", new_callable=AsyncMock, return_value=False
             ),
@@ -659,6 +654,7 @@ class TestRetryAndErrors:
 # ===========================================================================
 # OfertasDoDiaScraper — integração completa (scrape com mocks)
 # ===========================================================================
+
 
 class TestScrapeIntegration:
     @pytest.mark.asyncio
@@ -680,9 +676,7 @@ class TestScrapeIntegration:
             patch.object(
                 scraper, "_new_page", new_callable=AsyncMock, return_value=mock_page
             ),
-            patch.object(
-                scraper, "_goto", new_callable=AsyncMock, return_value=True
-            ),
+            patch.object(scraper, "_goto", new_callable=AsyncMock, return_value=True),
             patch.object(scraper, "_human_scroll", new_callable=AsyncMock),
             patch.object(scraper, "_random_delay", new_callable=AsyncMock),
             patch.object(
@@ -705,9 +699,7 @@ class TestScrapeIntegration:
 
         mock_page = AsyncMock()
         # Página 1: tem produtos; Página 2: vazia (para)
-        mock_page.content = AsyncMock(
-            side_effect=[html_poly_cards, html_no_products]
-        )
+        mock_page.content = AsyncMock(side_effect=[html_poly_cards, html_no_products])
         mock_page.wait_for_selector = AsyncMock()
         mock_page.close = AsyncMock()
         mock_page.evaluate = AsyncMock(return_value=0)
@@ -735,9 +727,7 @@ class TestScrapeIntegration:
             patch.object(
                 scraper, "_new_page", new_callable=AsyncMock, return_value=mock_page
             ),
-            patch.object(
-                scraper, "_goto", new_callable=AsyncMock, return_value=True
-            ),
+            patch.object(scraper, "_goto", new_callable=AsyncMock, return_value=True),
             patch.object(scraper, "_human_scroll", new_callable=AsyncMock),
             patch.object(scraper, "_random_delay", new_callable=AsyncMock),
             patch.object(
@@ -775,9 +765,7 @@ class TestScrapeIntegration:
             patch.object(
                 scraper, "_new_page", new_callable=AsyncMock, return_value=mock_page
             ),
-            patch.object(
-                scraper, "_goto", new_callable=AsyncMock, return_value=True
-            ),
+            patch.object(scraper, "_goto", new_callable=AsyncMock, return_value=True),
             patch.object(scraper, "_human_scroll", new_callable=AsyncMock),
             patch.object(scraper, "_random_delay", new_callable=AsyncMock),
             patch.object(
@@ -805,6 +793,7 @@ class TestScrapeIntegration:
 # CategoriaModaScraper — testes básicos de parsing
 # ===========================================================================
 
+
 class TestCategoriaModaScraper:
     def setup_method(self):
         self.scraper = CategoriaModaScraper.__new__(CategoriaModaScraper)
@@ -831,9 +820,11 @@ class TestCategoriaModaScraper:
 # Anti-bloqueio (BaseScraper)
 # ===========================================================================
 
+
 class TestAntiBlocking:
     def test_user_agent_rotation(self):
         """Verifica que o scraper gera UAs diferentes a cada chamada."""
+
         class ConcreteScraper(BaseScraper):
             async def scrape(self):
                 return []
@@ -853,6 +844,7 @@ class TestAntiBlocking:
 # ===========================================================================
 # OfertasDoDiaScraper — testes de preço (current vs original)
 # ===========================================================================
+
 
 class TestPriceExtraction:
     def setup_method(self):

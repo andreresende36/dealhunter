@@ -29,7 +29,7 @@ import structlog
 
 from src.config import settings
 from src.scraper.base_scraper import ScrapedProduct
-from .exceptions import SQLiteError, SyncError
+from .exceptions import SQLiteError
 
 if TYPE_CHECKING:
     from .supabase_client import SupabaseClient
@@ -251,12 +251,19 @@ class SQLiteFallback:
                     WHERE ml_id=?
                     """,
                     (
-                        product.title, product.price, product.original_price,
-                        int(product.discount_pct), product.seller,
-                        product.rating, product.review_count,
-                        int(product.free_shipping), product.image_url,
-                        product.url, product.category,
-                        first_seen, now,
+                        product.title,
+                        product.price,
+                        product.original_price,
+                        int(product.discount_pct),
+                        product.seller,
+                        product.rating,
+                        product.review_count,
+                        int(product.free_shipping),
+                        product.image_url,
+                        product.url,
+                        product.category,
+                        first_seen,
+                        now,
                         product.ml_id,
                     ),
                 )
@@ -273,14 +280,23 @@ class SQLiteFallback:
                     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     (
-                        product_id, product.ml_id, product.title,
-                        product.price, product.original_price,
-                        int(product.discount_pct), product.seller,
-                        "", 0,
-                        product.rating, product.review_count,
-                        int(product.free_shipping), product.image_url,
-                        product.url, product.category,
-                        now, now,
+                        product_id,
+                        product.ml_id,
+                        product.title,
+                        product.price,
+                        product.original_price,
+                        int(product.discount_pct),
+                        product.seller,
+                        "",
+                        0,
+                        product.rating,
+                        product.review_count,
+                        int(product.free_shipping),
+                        product.image_url,
+                        product.url,
+                        product.category,
+                        now,
+                        now,
                     ),
                 )
 
@@ -346,17 +362,11 @@ class SQLiteFallback:
             await self._db.commit()
             return True
         except Exception as exc:
-            raise SQLiteError(
-                str(exc), operation="add_price_history"
-            ) from exc
+            raise SQLiteError(str(exc), operation="add_price_history") from exc
 
-    async def get_price_history(
-        self, product_id: str, days: int = 30
-    ) -> list[dict]:
+    async def get_price_history(self, product_id: str, days: int = 30) -> list[dict]:
         """Retorna histórico de preços dos últimos N dias."""
-        cutoff = (
-            datetime.now(tz=timezone.utc) - timedelta(days=days)
-        ).isoformat()
+        cutoff = (datetime.now(tz=timezone.utc) - timedelta(days=days)).isoformat()
         try:
             cursor = await self._db.execute(
                 """
@@ -370,9 +380,7 @@ class SQLiteFallback:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
         except Exception as exc:
-            raise SQLiteError(
-                str(exc), operation="get_price_history"
-            ) from exc
+            raise SQLiteError(str(exc), operation="get_price_history") from exc
 
     # ------------------------------------------------------------------
     # scored_offers
@@ -404,8 +412,14 @@ class SQLiteFallback:
                 ) VALUES (?,?,?,?,?,?,?,?)
                 """,
                 (
-                    row_id, product_id, rule_score, ai_score, final_score,
-                    ai_description, status, now,
+                    row_id,
+                    product_id,
+                    rule_score,
+                    ai_score,
+                    final_score,
+                    ai_description,
+                    status,
+                    now,
                 ),
             )
             await self._db.commit()
@@ -417,9 +431,7 @@ class SQLiteFallback:
             )
             return row_id
         except Exception as exc:
-            raise SQLiteError(
-                str(exc), operation="save_scored_offer"
-            ) from exc
+            raise SQLiteError(str(exc), operation="save_scored_offer") from exc
 
     # ------------------------------------------------------------------
     # sent_offers
@@ -441,25 +453,24 @@ class SQLiteFallback:
                 VALUES (?,?,?,?,?)
                 """,
                 (
-                    str(uuid.uuid4()), scored_offer_id,
-                    channel, shlink_short_url, now,
+                    str(uuid.uuid4()),
+                    scored_offer_id,
+                    channel,
+                    shlink_short_url,
+                    now,
                 ),
             )
             await self._db.commit()
             return True
         except Exception as exc:
-            raise SQLiteError(
-                str(exc), operation="mark_as_sent"
-            ) from exc
+            raise SQLiteError(str(exc), operation="mark_as_sent") from exc
 
     async def was_recently_sent(self, ml_id: str, hours: int = 24) -> bool:
         """
         Verifica se um produto (pelo ml_id) foi enviado nas últimas N horas.
         JOIN: sent_offers → scored_offers → products.
         """
-        cutoff = (
-            datetime.now(tz=timezone.utc) - timedelta(hours=hours)
-        ).isoformat()
+        cutoff = (datetime.now(tz=timezone.utc) - timedelta(hours=hours)).isoformat()
         try:
             cursor = await self._db.execute(
                 """
@@ -482,9 +493,7 @@ class SQLiteFallback:
     # system_logs
     # ------------------------------------------------------------------
 
-    async def log_event(
-        self, event_type: str, details: Optional[dict] = None
-    ) -> bool:
+    async def log_event(self, event_type: str, details: Optional[dict] = None) -> bool:
         """Registra um evento operacional no banco local."""
         now = datetime.now(tz=timezone.utc).isoformat()
         try:
@@ -492,16 +501,16 @@ class SQLiteFallback:
                 "INSERT INTO system_logs (id, event_type, details, created_at)"
                 " VALUES (?,?,?,?)",
                 (
-                    str(uuid.uuid4()), event_type,
-                    json.dumps(details or {}), now,
+                    str(uuid.uuid4()),
+                    event_type,
+                    json.dumps(details or {}),
+                    now,
                 ),
             )
             await self._db.commit()
             return True
         except Exception as exc:
-            raise SQLiteError(
-                str(exc), operation="log_event"
-            ) from exc
+            raise SQLiteError(str(exc), operation="log_event") from exc
 
     async def get_recent_logs(
         self, event_type: Optional[str] = None, limit: int = 100
@@ -528,9 +537,7 @@ class SQLiteFallback:
                 result.append(d)
             return result
         except Exception as exc:
-            raise SQLiteError(
-                str(exc), operation="get_recent_logs"
-            ) from exc
+            raise SQLiteError(str(exc), operation="get_recent_logs") from exc
 
     # ------------------------------------------------------------------
     # sync_to_supabase
@@ -548,18 +555,10 @@ class SQLiteFallback:
         """
         logger.info("sqlite_sync_start")
         stats = {
-            "products": await self._sync_table(
-                client, "products", "ml_id"
-            ),
-            "price_history": await self._sync_table(
-                client, "price_history", "id"
-            ),
-            "scored_offers": await self._sync_table(
-                client, "scored_offers", "id"
-            ),
-            "sent_offers": await self._sync_table(
-                client, "sent_offers", "id"
-            ),
+            "products": await self._sync_table(client, "products", "ml_id"),
+            "price_history": await self._sync_table(client, "price_history", "id"),
+            "scored_offers": await self._sync_table(client, "scored_offers", "id"),
+            "sent_offers": await self._sync_table(client, "sent_offers", "id"),
             "system_logs": await self._sync_logs_table(client),
         }
         total_synced = sum(v["synced"] for v in stats.values())
@@ -628,11 +627,7 @@ class SQLiteFallback:
                 data = {k: row[k] for k in row.keys() if k != "synced"}
                 data["details"] = json.loads(data.get("details") or "{}")
                 try:
-                    res = (
-                        await client._db.table("system_logs")
-                        .insert(data)
-                        .execute()
-                    )
+                    res = await client._db.table("system_logs").insert(data).execute()
                     if res.data:
                         ok_ids.append(row_id)
                     else:
@@ -658,15 +653,16 @@ class SQLiteFallback:
     async def get_unsynced_count(self) -> dict[str, int]:
         """Retorna quantos registros estão pendentes de sincronização."""
         tables = [
-            "products", "price_history",
-            "scored_offers", "sent_offers", "system_logs",
+            "products",
+            "price_history",
+            "scored_offers",
+            "sent_offers",
+            "system_logs",
         ]
         counts: dict[str, int] = {}
         for table in tables:
             try:
-                sql = (
-                    f"SELECT COUNT(*) FROM {table} WHERE synced=0"  # noqa: S608
-                )
+                sql = f"SELECT COUNT(*) FROM {table} WHERE synced=0"  # noqa: S608
                 cursor = await self._db.execute(sql)
                 row = await cursor.fetchone()
                 counts[table] = row[0] if row else 0

@@ -19,16 +19,20 @@ load_dotenv(ROOT_DIR / ".env")
 # Supabase
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class SupabaseConfig:
     url: str = field(default_factory=lambda: os.environ["SUPABASE_URL"])
     anon_key: str = field(default_factory=lambda: os.environ["SUPABASE_ANON_KEY"])
-    service_role_key: str = field(default_factory=lambda: os.environ["SUPABASE_SERVICE_ROLE_KEY"])
+    service_role_key: str = field(
+        default_factory=lambda: os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+    )
 
 
 # ---------------------------------------------------------------------------
 # Telegram
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class TelegramConfig:
@@ -49,11 +53,14 @@ class TelegramConfig:
 # WhatsApp (Evolution API ou similar)
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class WhatsAppConfig:
     api_url: str = field(default_factory=lambda: os.getenv("WHATSAPP_API_URL", ""))
     api_key: str = field(default_factory=lambda: os.getenv("WHATSAPP_API_KEY", ""))
-    instance_name: str = field(default_factory=lambda: os.getenv("WHATSAPP_INSTANCE_NAME", "dealhunter"))
+    instance_name: str = field(
+        default_factory=lambda: os.getenv("WHATSAPP_INSTANCE_NAME", "dealhunter")
+    )
     # Números/grupos destino separados por vírgula
     group_ids: list[str] = field(
         default_factory=lambda: [
@@ -72,10 +79,13 @@ class WhatsAppConfig:
 # Claude API (Anthropic)
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ClaudeConfig:
     api_key: str = field(default_factory=lambda: os.environ["ANTHROPIC_API_KEY"])
-    model: str = field(default_factory=lambda: os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001"))
+    model: str = field(
+        default_factory=lambda: os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
+    )
     max_tokens: int = int(os.getenv("CLAUDE_MAX_TOKENS", "1024"))
     # Temperatura para análise de ofertas (0 = determinístico)
     temperature: float = float(os.getenv("CLAUDE_TEMPERATURE", "0.2"))
@@ -84,6 +94,7 @@ class ClaudeConfig:
 # ---------------------------------------------------------------------------
 # Shlink (encurtador de links)
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class ShlinkConfig:
@@ -96,11 +107,14 @@ class ShlinkConfig:
 # Mercado Livre Afiliados
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class MercadoLivreConfig:
     affiliate_id: str = field(default_factory=lambda: os.getenv("ML_AFFILIATE_ID", ""))
     # Tag de rastreamento para os links
-    affiliate_tag: str = field(default_factory=lambda: os.getenv("ML_AFFILIATE_TAG", "sempreblack"))
+    affiliate_tag: str = field(
+        default_factory=lambda: os.getenv("ML_AFFILIATE_TAG", "sempreblack")
+    )
     # Categorias monitoradas (IDs do ML separados por vírgula)
     category_ids: list[str] = field(
         default_factory=lambda: [
@@ -115,6 +129,7 @@ class MercadoLivreConfig:
 # Scraper
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ScraperConfig:
     # Delays em segundos (min, max)
@@ -127,12 +142,15 @@ class ScraperConfig:
     # Número máximo de retentativas por página
     max_retries: int = int(os.getenv("SCRAPER_MAX_RETRIES", "3"))
     # Proxy (opcional): "http://user:pass@host:port"
-    proxy_url: Optional[str] = field(default_factory=lambda: os.getenv("SCRAPER_PROXY_URL"))
+    proxy_url: Optional[str] = field(
+        default_factory=lambda: os.getenv("SCRAPER_PROXY_URL")
+    )
 
 
 # ---------------------------------------------------------------------------
 # Score Engine (filtros de qualidade de oferta)
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class ScoreConfig:
@@ -149,13 +167,16 @@ class ScoreConfig:
     weight_rating: float = float(os.getenv("SCORE_WEIGHT_RATING", "20.0"))
     weight_reviews: float = float(os.getenv("SCORE_WEIGHT_REVIEWS", "15.0"))
     weight_free_shipping: float = float(os.getenv("SCORE_WEIGHT_FREE_SHIPPING", "10.0"))
-    weight_official_store: float = float(os.getenv("SCORE_WEIGHT_OFFICIAL_STORE", "10.0"))
+    weight_official_store: float = float(
+        os.getenv("SCORE_WEIGHT_OFFICIAL_STORE", "10.0")
+    )
     weight_title_quality: float = float(os.getenv("SCORE_WEIGHT_TITLE_QUALITY", "10.0"))
 
 
 # ---------------------------------------------------------------------------
 # n8n
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class N8nConfig:
@@ -167,16 +188,20 @@ class N8nConfig:
 # SQLite Fallback
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class SQLiteConfig:
     db_path: Path = field(
-        default_factory=lambda: Path(os.getenv("SQLITE_DB_PATH", str(ROOT_DIR / "data" / "dealhunter.db")))
+        default_factory=lambda: Path(
+            os.getenv("SQLITE_DB_PATH", str(ROOT_DIR / "data" / "dealhunter.db"))
+        )
     )
 
 
 # ---------------------------------------------------------------------------
 # Configuração Global
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class Settings:

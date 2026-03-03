@@ -28,7 +28,7 @@ from src.config import settings
 from src.scraper.base_scraper import ScrapedProduct
 from .supabase_client import SupabaseClient
 from .sqlite_fallback import SQLiteFallback
-from .exceptions import StorageError, SupabaseError, SQLiteError
+from .exceptions import SupabaseError
 
 logger = structlog.get_logger(__name__)
 
@@ -126,9 +126,7 @@ class StorageManager:
             {"supabase": bool, "sqlite": bool}
         """
         sqlite_ok = await self._sqlite.ping()
-        supabase_ok = (
-            await self._supabase.ping() if self._using_supabase else False
-        )
+        supabase_ok = await self._supabase.ping() if self._using_supabase else False
         return {"supabase": supabase_ok, "sqlite": sqlite_ok}
 
     # ------------------------------------------------------------------
@@ -205,9 +203,7 @@ class StorageManager:
                 logger.warning("supabase_price_history_failed", error=str(exc))
         return local_ok
 
-    async def get_price_history(
-        self, product_id: str, days: int = 30
-    ) -> list[dict]:
+    async def get_price_history(self, product_id: str, days: int = 30) -> list[dict]:
         """Retorna histórico de preços dos últimos N dias."""
         if self._using_supabase:
             try:
@@ -239,14 +235,22 @@ class StorageManager:
             SQLiteError: se o SQLite local falhar.
         """
         local_id = await self._sqlite.save_scored_offer(
-            product_id, rule_score, final_score,
-            status, ai_score, ai_description,
+            product_id,
+            rule_score,
+            final_score,
+            status,
+            ai_score,
+            ai_description,
         )
         if self._using_supabase:
             try:
                 remote_id = await self._supabase.save_scored_offer(
-                    product_id, rule_score, final_score,
-                    status, ai_score, ai_description,
+                    product_id,
+                    rule_score,
+                    final_score,
+                    status,
+                    ai_score,
+                    ai_description,
                 )
                 return remote_id
             except SupabaseError as exc:
@@ -290,9 +294,7 @@ class StorageManager:
     # system_logs
     # ------------------------------------------------------------------
 
-    async def log_event(
-        self, event_type: str, details: dict | None = None
-    ) -> bool:
+    async def log_event(self, event_type: str, details: dict | None = None) -> bool:
         """Registra um evento operacional em ambos os bancos."""
         local_ok = await self._sqlite.log_event(event_type, details)
         if self._using_supabase:

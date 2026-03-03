@@ -61,7 +61,8 @@ class FakeDiscountDetector:
         if ratio > self.MAX_PRICE_RATIO:
             flags.append(
                 (
-                    f"Preço original {ratio:.1f}x maior que o atual (máx razoável: {self.MAX_PRICE_RATIO}x)",
+                    f"Preço original {ratio:.1f}x maior que o atual "
+                    f"(máx razoável: {self.MAX_PRICE_RATIO}x)",
                     0.8,
                 )
             )

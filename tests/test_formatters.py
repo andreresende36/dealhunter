@@ -3,7 +3,7 @@ Testes para o Message Formatter e Affiliate Links.
 """
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from src.scraper.base_scraper import ScrapedProduct
 from src.distributor.message_formatter import MessageFormatter
@@ -13,6 +13,7 @@ from src.distributor.affiliate_links import AffiliateLinkBuilder
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def formatter() -> MessageFormatter:
@@ -40,6 +41,7 @@ def sample_product() -> ScrapedProduct:
 # ---------------------------------------------------------------------------
 # MessageFormatter
 # ---------------------------------------------------------------------------
+
 
 class TestMessageFormatter:
     def test_format_returns_formatted_message(self, formatter, sample_product):
@@ -90,7 +92,9 @@ class TestMessageFormatter:
 
     def test_hashtags_include_sempreblack(self, formatter, sample_product):
         msg = formatter.format(sample_product, short_link="https://s.black/abc")
-        assert "#SempreBlack" in msg.telegram_text or "#SempreBlack" in msg.whatsapp_text
+        assert (
+            "#SempreBlack" in msg.telegram_text or "#SempreBlack" in msg.whatsapp_text
+        )
 
     def test_custom_title_used(self, formatter, sample_product):
         custom = "Oferta Incrível de Tênis"
@@ -112,6 +116,7 @@ class TestMessageFormatter:
 # ---------------------------------------------------------------------------
 # AffiliateLinkBuilder
 # ---------------------------------------------------------------------------
+
 
 class TestAffiliateLinkBuilder:
     def setup_method(self):

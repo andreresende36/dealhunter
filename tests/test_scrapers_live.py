@@ -10,7 +10,6 @@ Flags úteis:
     -k smoke    roda só o smoke test rápido (1 página)
 """
 
-import asyncio
 import pytest
 from src.scraper.ofertas_do_dia import OfertasDoDiaScraper
 
@@ -32,7 +31,11 @@ async def test_smoke_scrape_one_page():
         print(f"\n  [{i}] {p.title[:60]}")
         print(f"      ML ID:     {p.ml_id}")
         print(f"      Preço:     R$ {p.price:.2f}")
-        print(f"      Original:  R$ {p.original_price:.2f}" if p.original_price else "      Original:  —")
+        print(
+            f"      Original:  R$ {p.original_price:.2f}"
+            if p.original_price
+            else "      Original:  —"
+        )
         print(f"      Desconto:  {p.discount_pct}%")
         print(f"      Frete:     {'Grátis ✓' if p.free_shipping else 'Pago'}")
         print(f"      Imagem:    {'✓' if p.image_url else '✗'}")
@@ -43,7 +46,9 @@ async def test_smoke_scrape_one_page():
     print()
 
     # Validações
-    assert len(products) > 0, "Nenhum produto encontrado — seletores CSS podem estar desatualizados!"
+    assert (
+        len(products) > 0
+    ), "Nenhum produto encontrado — seletores CSS podem estar desatualizados!"
 
     # Verifica campos obrigatórios em cada produto
     for p in products:

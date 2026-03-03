@@ -5,10 +5,8 @@ Testa o pipeline completo (storage, score, formatação, affiliate links)
 usando SQLite real em memória e mocks para serviços externos.
 """
 
-import asyncio
-import time
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
@@ -20,7 +18,7 @@ from src.distributor.message_formatter import MessageFormatter
 from src.distributor.affiliate_links import AffiliateLinkBuilder
 from src.database.sqlite_fallback import SQLiteFallback
 from src.database.storage_manager import StorageManager
-from src.database.exceptions import SQLiteError, SupabaseError
+from src.database.exceptions import SupabaseError
 
 
 # ---------------------------------------------------------------------------
@@ -323,7 +321,7 @@ class TestLogRedaction:
     def test_redact_jwt(self):
         from src.main import _redact_sensitive_data
 
-        jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"
+        jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"  # noqa: E501
         event = {"detail": f"Failed: {jwt}"}
         result = _redact_sensitive_data(None, None, event)
         assert "dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U" not in result["detail"]

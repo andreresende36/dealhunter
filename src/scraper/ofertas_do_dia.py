@@ -9,7 +9,10 @@ Seletores CSS validados via ml_selectors_report.md (componentes poly- e andes-).
 from __future__ import annotations
 
 import time
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from src.database.storage_manager import StorageManager
 
 import structlog
 from bs4 import BeautifulSoup, Tag
@@ -353,7 +356,8 @@ class OfertasDoDiaScraper(BaseScraper):
 
             # --- Badges ---
             badge_tag = item.select_one(SELECTORS["badge"])
-            badge = badge_tag.get_text(strip=True) if badge_tag else ""
+            if badge_tag:
+                pass  # currently unused, but can be recorded if needed in the future
 
             # Monta o produto
             product = ScrapedProduct(

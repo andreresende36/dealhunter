@@ -225,7 +225,10 @@ class ScoreEngine:
         Retorna mensagem de rejeição ou None se passou.
         """
         if product.discount_pct < self.cfg.min_discount_pct:
-            return f"Desconto {product.discount_pct:.0f}% abaixo do mínimo {self.cfg.min_discount_pct:.0f}%"
+            return (
+                f"Desconto {product.discount_pct:.0f}% abaixo do "
+                f"mínimo {self.cfg.min_discount_pct:.0f}%"
+            )
 
         if product.rating > 0 and product.rating < self.cfg.min_rating:
             return f"Avaliação {product.rating} abaixo do mínimo {self.cfg.min_rating}"
