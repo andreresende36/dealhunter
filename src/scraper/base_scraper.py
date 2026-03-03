@@ -107,6 +107,10 @@ class ScrapedProduct:
     free_shipping: bool = False
     is_official_store: bool = False
 
+    # Dados de enriquecimento (preenchidos pelo deep scrape)
+    seller_reputation: str = ""  # "platinum" | "gold" | "silver" | ""
+    sold_quantity: int = 0
+
     # Controle interno
     scraped_at: float = field(default_factory=time.time)
     source: str = ""  # Ex: "ofertas_do_dia", "categoria_moda"
@@ -131,6 +135,8 @@ class ScrapedProduct:
             "image_url": self.image_url,
             "free_shipping": self.free_shipping,
             "is_official_store": self.is_official_store,
+            "seller_reputation": self.seller_reputation,
+            "sold_quantity": self.sold_quantity,
             "scraped_at": self.scraped_at,
             "source": self.source,
         }
