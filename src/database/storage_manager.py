@@ -146,12 +146,12 @@ class StorageManager:
         Raises:
             SQLiteError: se o SQLite local falhar (crítico — dado perdido).
         """
-        # SQLite sempre primeiro — garante que o dado não se perde
-        local_id = await self._sqlite.upsert_product(product)
-
         if self._using_supabase:
             try:
+                # Supabase primeiro: gera o UUID canônico
                 remote_id = await self._supabase.upsert_product(product)
+                # SQLite usa o mesmo UUID para manter FKs consistentes
+                await self._sqlite.upsert_product(product, product_id=remote_id)
                 return remote_id
             except SupabaseError as exc:
                 logger.warning(
@@ -160,7 +160,8 @@ class StorageManager:
                     error=str(exc),
                 )
 
-        return local_id
+        # Supabase indisponível: SQLite gera seu próprio UUID
+        return await self._sqlite.upsert_product(product)
 
     async def check_duplicate(self, ml_id: str) -> bool:
         """Verifica se um produto já existe (consulta o backend ativo, fallback no outro)."""

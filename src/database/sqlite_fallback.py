@@ -218,12 +218,20 @@ class SQLiteFallback:
     # products
     # ------------------------------------------------------------------
 
-    async def upsert_product(self, product: ScrapedProduct) -> Optional[str]:
+    async def upsert_product(
+        self, product: ScrapedProduct, product_id: Optional[str] = None
+    ) -> Optional[str]:
         """
         Insere ou atualiza um produto pelo ml_id.
 
-        Na inserção: gera UUID e define first_seen_at.
+        Na inserção: usa product_id fornecido (quando Supabase disponível)
+                     ou gera um novo UUID.
         Na atualização: preserva id e first_seen_at originais.
+
+        Args:
+            product: Dados do produto scrapeado.
+            product_id: UUID a usar na inserção. Se None, gera um novo.
+                        Ignorado se o produto já existir no SQLite.
 
         Returns:
             UUID (str) do produto, ou None em caso de erro.
@@ -268,7 +276,7 @@ class SQLiteFallback:
                     ),
                 )
             else:
-                product_id = str(uuid.uuid4())
+                product_id = product_id or str(uuid.uuid4())
                 await self._db.execute(
                     """
                     INSERT INTO products (
