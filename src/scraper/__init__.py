@@ -4,12 +4,14 @@ Coleta ofertas do Mercado Livre com técnicas de anti-bloqueio.
 """
 
 from .base_scraper import BaseScraper, ScrapedProduct
-from .ofertas_do_dia import OfertasDoDiaScraper
-from .categoria_moda import CategoriaModaScraper
+from .ml_scraper import MLScraper, ScrapeSource
+from .product_detail_scraper import ProductDetailScraper, EnrichedProductData
 
 __all__ = [
     "BaseScraper",
     "ScrapedProduct",
-    "OfertasDoDiaScraper",
-    "CategoriaModaScraper",
+    "MLScraper",
+    "ScrapeSource",
+    "ProductDetailScraper",
+    "EnrichedProductData",
 ]

@@ -292,6 +292,101 @@ class StorageManager:
         return await self._sqlite.was_recently_sent(ml_id, hours)
 
     # ------------------------------------------------------------------
+    # Enrichment queue (deep scrape worker)
+    # ------------------------------------------------------------------
+
+    async def claim_for_enrichment(self, batch_size: int = 10) -> list[dict]:
+        """Reclama um lote de produtos pendentes para enriquecimento."""
+        if self._using_supabase:
+            try:
+                return await self._supabase.claim_for_enrichment(batch_size)
+            except SupabaseError as exc:
+                logger.warning("supabase_claim_failed", error=str(exc))
+        return await self._sqlite.claim_for_enrichment(batch_size)
+
+    async def set_enrichment_status(
+        self, product_id: str, status: str, error: str = ""
+    ) -> bool:
+        """Atualiza o status de enriquecimento em ambos os bancos."""
+        local_ok = await self._sqlite.set_enrichment_status(
+            product_id, status, error
+        )
+        if self._using_supabase:
+            try:
+                return await self._supabase.set_enrichment_status(
+                    product_id, status, error
+                )
+            except SupabaseError as exc:
+                logger.warning(
+                    "supabase_set_enrichment_status_failed", error=str(exc)
+                )
+        return local_ok
+
+    async def increment_enrichment_attempts(self, product_id: str) -> bool:
+        """Incrementa o contador de tentativas em ambos os bancos."""
+        local_ok = await self._sqlite.increment_enrichment_attempts(product_id)
+        if self._using_supabase:
+            try:
+                return await self._supabase.increment_enrichment_attempts(
+                    product_id
+                )
+            except SupabaseError as exc:
+                logger.warning(
+                    "supabase_increment_attempts_failed", error=str(exc)
+                )
+        return local_ok
+
+    async def update_enriched_data(self, product_id: str, data: dict) -> bool:
+        """Atualiza um produto com dados do deep scrape em ambos os bancos."""
+        local_ok = await self._sqlite.update_enriched_data(product_id, data)
+        if self._using_supabase:
+            try:
+                return await self._supabase.update_enriched_data(
+                    product_id, data
+                )
+            except SupabaseError as exc:
+                logger.warning(
+                    "supabase_update_enriched_failed", error=str(exc)
+                )
+        return local_ok
+
+    async def get_product_for_scoring(self, product_id: str) -> dict | None:
+        """Retorna dados completos de um produto para scoring."""
+        if self._using_supabase:
+            try:
+                return await self._supabase.get_product_for_scoring(product_id)
+            except SupabaseError:
+                pass
+        return await self._sqlite.get_product_for_scoring(product_id)
+
+    async def get_products_needing_retry(
+        self, max_attempts: int = 3, batch_size: int = 5
+    ) -> list[dict]:
+        """Retorna produtos com falha que podem ser retentados."""
+        if self._using_supabase:
+            try:
+                return await self._supabase.get_products_needing_retry(
+                    max_attempts, batch_size
+                )
+            except SupabaseError:
+                pass
+        return await self._sqlite.get_products_needing_retry(
+            max_attempts, batch_size
+        )
+
+    async def reset_stale_claims(self, stale_minutes: int = 30) -> int:
+        """Reseta produtos in_progress por tempo demais (crash recovery)."""
+        count = await self._sqlite.reset_stale_claims(stale_minutes)
+        if self._using_supabase:
+            try:
+                count = await self._supabase.reset_stale_claims(stale_minutes)
+            except SupabaseError as exc:
+                logger.warning(
+                    "supabase_reset_stale_failed", error=str(exc)
+                )
+        return count
+
+    # ------------------------------------------------------------------
     # system_logs
     # ------------------------------------------------------------------
 
