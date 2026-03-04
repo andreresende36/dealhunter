@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import structlog
 from bs4 import BeautifulSoup
@@ -66,21 +66,13 @@ DETAIL_SELECTORS = {
         "a.ui-seller-data-header__link, "
         "span.ui-seller-info__name"
     ),
-    "sold_quantity": (
-        "span.ui-pdp-subtitle__text, "
-        "span.ui-pdp-header__subtitle"
-    ),
+    "sold_quantity": ("span.ui-pdp-subtitle__text, " "span.ui-pdp-header__subtitle"),
     "rating": (
-        "span.ui-pdp-review__rating, "
-        "span.ui-pdp-reviews__rating__summary__average"
+        "span.ui-pdp-review__rating, " "span.ui-pdp-reviews__rating__summary__average"
     ),
-    "review_count": (
-        "span.ui-pdp-review__amount, "
-        "span.ui-pdp-reviews__amount"
-    ),
+    "review_count": ("span.ui-pdp-review__amount, " "span.ui-pdp-reviews__amount"),
     "official_store": (
-        "a.ui-pdp-merchant-header__link, "
-        "span.ui-pdp-official-store-label"
+        "a.ui-pdp-merchant-header__link, " "span.ui-pdp-official-store-label"
     ),
 }
 
@@ -118,19 +110,13 @@ class ProductDetailScraper(BaseScraper):
             "Use enrich_product() para processar URLs individuais."
         )
 
-    async def _rotate_context_if_needed(
-        self, every_n_requests: int = 0
-    ) -> None:
-        """Override com lock e frequência configurável."""
-        n = every_n_requests or self._deep_cfg.context_rotation_every
-        if self._request_count > 0 and self._request_count % n == 0:
-            async with self._context_lock:
-                logger.info(
-                    "rotating_context",
-                    request_count=self._request_count,
-                )
-                await self._context.close()
-                await self._new_context()
+    async def force_rotate_context(self) -> None:
+        """Chamado explicitamente pelo worker entre os batches para rotacionar
+        o contexto de forma segura (quando não há abas ativas)."""
+        async with self._context_lock:
+            logger.info("rotating_context", request_count=self._request_count)
+            await self._context.close()
+            await self._new_context()
 
     async def _deep_delay(self) -> None:
         """Delay mais longo para deep scraping."""
@@ -147,9 +133,7 @@ class ProductDetailScraper(BaseScraper):
     # Método principal: enriquecer um produto
     # ------------------------------------------------------------------
 
-    async def enrich_product(
-        self, url: str, ml_id: str
-    ) -> EnrichedProductData:
+    async def enrich_product(self, url: str, ml_id: str) -> EnrichedProductData:
         """
         Visita a página de um produto e extrai dados detalhados.
 
@@ -236,9 +220,7 @@ class ProductDetailScraper(BaseScraper):
     # Parsing da página de detalhe
     # ------------------------------------------------------------------
 
-    def _parse_product_detail(
-        self, html: str, ml_id: str
-    ) -> EnrichedProductData:
+    def _parse_product_detail(self, html: str, ml_id: str) -> EnrichedProductData:
         """Extrai dados detalhados do HTML da página de produto."""
         soup = BeautifulSoup(html, "html.parser")
 
