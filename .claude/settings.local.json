@@ -4,7 +4,9 @@
       "Bash(.venv/bin/python -m pytest tests/test_scrapers.py -v)",
       "mcp__supabase__apply_migration",
       "mcp__supabase__list_tables",
-      "mcp__supabase__list_migrations"
+      "mcp__supabase__list_migrations",
+      "Bash(python -m flake8 src/config.py src/scraper/product_detail_scraper.py src/analyzer/score_engine.py src/main.py src/worker.py src/database/sqlite_fallback.py src/database/supabase_client.py src/database/storage_manager.py --max-line-length=100 --ignore=E501,W503)",
+      "mcp__supabase__execute_sql"
     ]
   },
   "enableAllProjectMcpServers": true,
