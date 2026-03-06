@@ -115,14 +115,6 @@ class MercadoLivreConfig:
     affiliate_tag: str = field(
         default_factory=lambda: os.getenv("ML_AFFILIATE_TAG", "sempreblack")
     )
-    # Categorias monitoradas (IDs do ML separados por vírgula)
-    category_ids: list[str] = field(
-        default_factory=lambda: [
-            c.strip()
-            for c in os.getenv("ML_CATEGORY_IDS", "MLB1430").split(",")
-            if c.strip()
-        ]
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -162,21 +154,12 @@ class ScoreConfig:
     min_rating: float = float(os.getenv("SCORE_MIN_RATING", "4.0"))
     # Número mínimo de avaliações
     min_reviews: int = int(os.getenv("SCORE_MIN_REVIEWS", "10"))
-    # Pesos por critério (soma deve dar ~100)
-    weight_discount: float = float(os.getenv("SCORE_WEIGHT_DISCOUNT", "30.0"))
-    weight_rating: float = float(os.getenv("SCORE_WEIGHT_RATING", "15.0"))
-    weight_reviews: float = float(os.getenv("SCORE_WEIGHT_REVIEWS", "10.0"))
+    # Pesos por critério (soma = 100)
+    weight_discount: float = float(os.getenv("SCORE_WEIGHT_DISCOUNT", "40.0"))
+    weight_rating: float = float(os.getenv("SCORE_WEIGHT_RATING", "25.0"))
+    weight_reviews: float = float(os.getenv("SCORE_WEIGHT_REVIEWS", "15.0"))
     weight_free_shipping: float = float(os.getenv("SCORE_WEIGHT_FREE_SHIPPING", "10.0"))
-    weight_official_store: float = float(
-        os.getenv("SCORE_WEIGHT_OFFICIAL_STORE", "5.0")
-    )
-    weight_title_quality: float = float(os.getenv("SCORE_WEIGHT_TITLE_QUALITY", "5.0"))
-    weight_seller_reputation: float = float(
-        os.getenv("SCORE_WEIGHT_SELLER_REPUTATION", "15.0")
-    )
-    weight_sold_quantity: float = float(
-        os.getenv("SCORE_WEIGHT_SOLD_QUANTITY", "10.0")
-    )
+    weight_title_quality: float = float(os.getenv("SCORE_WEIGHT_TITLE_QUALITY", "10.0"))
 
 
 # ---------------------------------------------------------------------------
@@ -205,34 +188,6 @@ class SQLiteConfig:
 
 
 # ---------------------------------------------------------------------------
-# Deep Scrape Worker
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class DeepScrapeConfig:
-    # Delays mais conservadores que o scraper de listagem (anti-bot)
-    delay_min: float = float(os.getenv("DEEP_SCRAPE_DELAY_MIN", "3.0"))
-    delay_max: float = float(os.getenv("DEEP_SCRAPE_DELAY_MAX", "8.0"))
-    # Intervalo entre polls ao DB quando a fila está vazia (segundos)
-    poll_interval: int = int(os.getenv("DEEP_SCRAPE_POLL_INTERVAL", "30"))
-    # Produtos por batch
-    batch_size: int = int(os.getenv("DEEP_SCRAPE_BATCH_SIZE", "10"))
-    # Concorrência máxima (abas simultâneas no browser)
-    max_concurrent: int = int(os.getenv("DEEP_SCRAPE_MAX_CONCURRENT", "3"))
-    # Retry de produtos com falha
-    max_attempts: int = int(os.getenv("DEEP_SCRAPE_MAX_ATTEMPTS", "3"))
-    backoff_base_minutes: int = int(os.getenv("DEEP_SCRAPE_BACKOFF_BASE_MIN", "5"))
-    # Rotação de contexto mais agressiva (a cada N requests)
-    context_rotation_every: int = int(
-        os.getenv("DEEP_SCRAPE_CONTEXT_ROTATION", "10")
-    )
-    # Pausa ao detectar CAPTCHAs consecutivos
-    captcha_pause_seconds: int = int(os.getenv("DEEP_SCRAPE_CAPTCHA_PAUSE", "300"))
-    max_consecutive_captchas: int = int(os.getenv("DEEP_SCRAPE_MAX_CAPTCHAS", "3"))
-
-
-# ---------------------------------------------------------------------------
 # Configuração Global
 # ---------------------------------------------------------------------------
 
@@ -249,7 +204,6 @@ class Settings:
     score: ScoreConfig = field(default_factory=ScoreConfig)
     n8n: N8nConfig = field(default_factory=N8nConfig)
     sqlite: SQLiteConfig = field(default_factory=SQLiteConfig)
-    deep_scrape: DeepScrapeConfig = field(default_factory=DeepScrapeConfig)
 
     # Ambiente de execução
     env: str = field(default_factory=lambda: os.getenv("APP_ENV", "development"))

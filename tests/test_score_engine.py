@@ -23,11 +23,10 @@ def mock_settings():
         mock.score.min_score = 60
         mock.score.min_rating = 4.0
         mock.score.min_reviews = 10
-        mock.score.weight_discount = 35.0
-        mock.score.weight_rating = 20.0
+        mock.score.weight_discount = 40.0
+        mock.score.weight_rating = 25.0
         mock.score.weight_reviews = 15.0
         mock.score.weight_free_shipping = 10.0
-        mock.score.weight_official_store = 10.0
         mock.score.weight_title_quality = 10.0
         yield mock
 
@@ -48,7 +47,6 @@ def great_product() -> ScrapedProduct:
         rating=4.8,
         review_count=500,
         free_shipping=True,
-        is_official_store=True,
         category="Bolsas",
     )
 
@@ -64,7 +62,6 @@ def bad_product() -> ScrapedProduct:
         rating=3.0,
         review_count=2,
         free_shipping=False,
-        is_official_store=False,
     )
 
 
@@ -92,23 +89,14 @@ class TestScoreEngine:
         diff = result_with.score - result_without.score
         assert diff == pytest.approx(10.0, abs=0.5)
 
-    def test_official_store_adds_10_pts(self, engine, great_product):
-        result_with = engine.evaluate(great_product)
-
-        great_product.is_official_store = False
-        result_without = engine.evaluate(great_product)
-
-        diff = result_with.score - result_without.score
-        assert diff == pytest.approx(10.0, abs=0.5)
-
     def test_discount_scoring(self, engine):
         assert engine._score_discount(0) == 0.0
-        assert engine._score_discount(80) == 35.0
-        assert engine._score_discount(40) == pytest.approx(17.5, abs=1.0)
+        assert engine._score_discount(80) == 40.0
+        assert engine._score_discount(40) == pytest.approx(20.0, abs=1.0)
 
     def test_rating_scoring(self, engine):
         assert engine._score_rating(3.4) == 0.0
-        assert engine._score_rating(5.0) == 20.0
+        assert engine._score_rating(5.0) == 25.0
         assert engine._score_rating(4.0) > 0
 
     def test_reviews_scoring(self, engine):

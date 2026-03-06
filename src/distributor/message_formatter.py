@@ -173,8 +173,6 @@ class MessageFormatter:
         """Gera descrição automática baseada nos atributos do produto."""
         parts = []
 
-        if product.is_official_store:
-            parts.append("✔️ Loja Oficial")
         if product.rating >= 4.5:
             parts.append(f"⭐ {product.rating}/5 ({product.review_count} avaliações)")
         elif product.rating >= 4.0:

@@ -38,7 +38,6 @@ def good_product() -> ScrapedProduct:
         review_count=350,
         category="Calçados",
         free_shipping=True,
-        is_official_store=True,
         image_url="https://http2.mlstatic.com/image.jpg",
         source="ofertas_do_dia",
     )
@@ -56,7 +55,6 @@ def mediocre_product() -> ScrapedProduct:
         review_count=50,
         category="Moda",
         free_shipping=False,
-        is_official_store=False,
         source="categoria_moda",
     )
 
@@ -92,11 +90,10 @@ def mock_settings():
         mock.score.min_score = 60
         mock.score.min_rating = 4.0
         mock.score.min_reviews = 10
-        mock.score.weight_discount = 35.0
-        mock.score.weight_rating = 20.0
+        mock.score.weight_discount = 40.0
+        mock.score.weight_rating = 25.0
         mock.score.weight_reviews = 15.0
         mock.score.weight_free_shipping = 10.0
-        mock.score.weight_official_store = 10.0
         mock.score.weight_title_quality = 10.0
         yield mock
 
@@ -310,7 +307,7 @@ class TestLogRedaction:
     """Testa que o processador de redação mascara dados sensíveis."""
 
     def test_redact_anthropic_key(self):
-        from src.main import _redact_sensitive_data
+        from src.logging_config import _redact_sensitive_data
 
         event = {"error": "Auth failed with key sk-ant-api03-abcdefghijklmnop"}
         result = _redact_sensitive_data(None, None, event)
@@ -319,7 +316,7 @@ class TestLogRedaction:
         assert "****" in result["error"]
 
     def test_redact_jwt(self):
-        from src.main import _redact_sensitive_data
+        from src.logging_config import _redact_sensitive_data
 
         jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"  # noqa: E501
         event = {"detail": f"Failed: {jwt}"}
@@ -328,7 +325,7 @@ class TestLogRedaction:
         assert "****" in result["detail"]
 
     def test_redact_bearer(self):
-        from src.main import _redact_sensitive_data
+        from src.logging_config import _redact_sensitive_data
 
         event = {"header": "Bearer eyJhbGciOiJIUzI1NiJ9.abc123.xyz"}
         result = _redact_sensitive_data(None, None, event)
@@ -336,7 +333,7 @@ class TestLogRedaction:
         assert "Bearer ****" in result["header"]
 
     def test_non_string_values_untouched(self):
-        from src.main import _redact_sensitive_data
+        from src.logging_config import _redact_sensitive_data
 
         event = {"count": 42, "ok": True, "items": ["a", "b"]}
         result = _redact_sensitive_data(None, None, event)

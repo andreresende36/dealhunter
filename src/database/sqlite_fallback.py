@@ -111,8 +111,6 @@ class SQLiteFallback:
             original_price    REAL,
             discount_percent  INTEGER DEFAULT 0,
             seller_name       TEXT DEFAULT '',
-            seller_reputation TEXT DEFAULT '',
-            sold_quantity     INTEGER DEFAULT 0,
             rating_stars      REAL DEFAULT 0,
             rating_count      INTEGER DEFAULT 0,
             free_shipping     INTEGER DEFAULT 0,
@@ -122,10 +120,6 @@ class SQLiteFallback:
             first_seen_at     TEXT DEFAULT (datetime('now')),
             last_seen_at      TEXT DEFAULT (datetime('now')),
             created_at        TEXT DEFAULT (datetime('now')),
-            enrichment_status TEXT DEFAULT 'pending',
-            enrichment_attempts INTEGER DEFAULT 0,
-            enrichment_error  TEXT DEFAULT '',
-            enriched_at       TEXT DEFAULT NULL,
             synced            INTEGER DEFAULT 0
         );
 
@@ -177,9 +171,6 @@ class SQLiteFallback:
         CREATE INDEX IF NOT EXISTS idx_p_last_seen
             ON products(last_seen_at DESC);
         CREATE INDEX IF NOT EXISTS idx_p_synced ON products(synced);
-        CREATE INDEX IF NOT EXISTS idx_p_enrichment
-            ON products(enrichment_status);
-
         CREATE INDEX IF NOT EXISTS idx_ph_product
             ON price_history(product_id);
         CREATE INDEX IF NOT EXISTS idx_ph_recorded
@@ -287,11 +278,11 @@ class SQLiteFallback:
                     """
                     INSERT INTO products (
                         id, ml_id, title, current_price, original_price,
-                        discount_percent, seller_name, seller_reputation,
-                        sold_quantity, rating_stars, rating_count,
+                        discount_percent, seller_name,
+                        rating_stars, rating_count,
                         free_shipping, thumbnail_url, product_url, category,
                         first_seen_at, last_seen_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     (
                         product_id,
@@ -301,8 +292,6 @@ class SQLiteFallback:
                         product.original_price,
                         int(product.discount_pct),
                         product.seller,
-                        "",
-                        0,
                         product.rating,
                         product.review_count,
                         int(product.free_shipping),
@@ -326,6 +315,54 @@ class SQLiteFallback:
             raise SQLiteError(
                 str(exc), operation="upsert_product", ml_id=product.ml_id
             ) from exc
+
+    async def product_exists(self, product_id: str) -> bool:
+        """Verifica se um produto existe no banco local pelo UUID."""
+        try:
+            cursor = await self._db.execute(
+                "SELECT 1 FROM products WHERE id = ?", (product_id,)
+            )
+            return await cursor.fetchone() is not None
+        except Exception as exc:
+            raise SQLiteError(
+                str(exc), operation="product_exists", ml_id=product_id
+            ) from exc
+
+    async def insert_product_from_dict(self, data: dict) -> None:
+        """Insere um produto a partir de um dict (ex: dados do Supabase). Ignora se já existir."""
+        try:
+            await self._db.execute(
+                """
+                INSERT OR IGNORE INTO products (
+                    id, ml_id, title, current_price, original_price,
+                    discount_percent, seller_name,
+                    rating_stars, rating_count,
+                    free_shipping, thumbnail_url, product_url, category,
+                    first_seen_at, last_seen_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    str(data.get("id", "")),
+                    str(data.get("ml_id", "")),
+                    str(data.get("title", "")),
+                    float(data.get("current_price", 0)),
+                    data.get("original_price"),
+                    int(data.get("discount_percent", 0)),
+                    str(data.get("seller_name", "")),
+                    float(data.get("rating_stars", 0)),
+                    int(data.get("rating_count", 0)),
+                    int(bool(data.get("free_shipping", False))),
+                    str(data.get("thumbnail_url", "")),
+                    str(data.get("product_url", "")),
+                    str(data.get("category", "")),
+                    str(data.get("first_seen_at", "")),
+                    str(data.get("last_seen_at", "")),
+                ),
+            )
+            await self._db.commit()
+            logger.debug("sqlite_product_inserted_from_dict", product_id=data.get("id"))
+        except Exception as exc:
+            raise SQLiteError(str(exc), operation="insert_product_from_dict") from exc
 
     async def check_duplicate(self, ml_id: str) -> bool:
         """Retorna True se o produto já existe no banco local."""
@@ -501,185 +538,6 @@ class SQLiteFallback:
         except Exception as exc:
             raise SQLiteError(
                 str(exc), operation="was_recently_sent", ml_id=ml_id
-            ) from exc
-
-    # ------------------------------------------------------------------
-    # Enrichment queue (deep scrape worker)
-    # ------------------------------------------------------------------
-
-    async def claim_for_enrichment(self, batch_size: int = 10) -> list[dict]:
-        """Reclama um lote de produtos pendentes para enriquecimento."""
-        try:
-            cursor = await self._db.execute(
-                """
-                SELECT id, ml_id, product_url
-                FROM products
-                WHERE enrichment_status = 'pending'
-                ORDER BY last_seen_at DESC
-                LIMIT ?
-                """,
-                (batch_size,),
-            )
-            rows = await cursor.fetchall()
-            if not rows:
-                return []
-
-            ids = [row["id"] for row in rows]
-            placeholders = ",".join("?" for _ in ids)
-            await self._db.execute(
-                f"UPDATE products SET enrichment_status = 'in_progress'"  # noqa: S608
-                f" WHERE id IN ({placeholders})"
-                f" AND enrichment_status = 'pending'",
-                ids,
-            )
-            await self._db.commit()
-            logger.debug("sqlite_enrichment_claimed", count=len(ids))
-            return [dict(row) for row in rows]
-        except Exception as exc:
-            raise SQLiteError(
-                str(exc), operation="claim_for_enrichment"
-            ) from exc
-
-    async def set_enrichment_status(
-        self, product_id: str, status: str, error: str = ""
-    ) -> bool:
-        """Atualiza o status de enriquecimento de um produto."""
-        now = datetime.now(tz=timezone.utc).isoformat()
-        try:
-            if status == "failed":
-                await self._db.execute(
-                    """
-                    UPDATE products
-                    SET enrichment_status = ?, enrichment_error = ?, synced = 0
-                    WHERE id = ?
-                    """,
-                    (status, error, product_id),
-                )
-            elif status == "enriched":
-                await self._db.execute(
-                    """
-                    UPDATE products
-                    SET enrichment_status = ?, enriched_at = ?, synced = 0
-                    WHERE id = ?
-                    """,
-                    (status, now, product_id),
-                )
-            else:
-                await self._db.execute(
-                    """
-                    UPDATE products
-                    SET enrichment_status = ?, synced = 0
-                    WHERE id = ?
-                    """,
-                    (status, product_id),
-                )
-            await self._db.commit()
-            return True
-        except Exception as exc:
-            raise SQLiteError(
-                str(exc), operation="set_enrichment_status"
-            ) from exc
-
-    async def increment_enrichment_attempts(self, product_id: str) -> bool:
-        """Incrementa o contador de tentativas de enriquecimento."""
-        try:
-            await self._db.execute(
-                """
-                UPDATE products
-                SET enrichment_attempts = enrichment_attempts + 1, synced = 0
-                WHERE id = ?
-                """,
-                (product_id,),
-            )
-            await self._db.commit()
-            return True
-        except Exception as exc:
-            raise SQLiteError(
-                str(exc), operation="increment_enrichment_attempts"
-            ) from exc
-
-    async def update_enriched_data(self, product_id: str, data: dict) -> bool:
-        """Atualiza um produto com dados coletados no deep scrape."""
-        if not data:
-            return True
-        try:
-            set_clauses = ", ".join(f"{k} = ?" for k in data)
-            values = list(data.values()) + [product_id]
-            await self._db.execute(
-                f"UPDATE products SET {set_clauses}, synced = 0"  # noqa: S608
-                f" WHERE id = ?",
-                values,
-            )
-            await self._db.commit()
-            logger.debug(
-                "sqlite_enriched_data_updated", product_id=product_id
-            )
-            return True
-        except Exception as exc:
-            raise SQLiteError(
-                str(exc), operation="update_enriched_data"
-            ) from exc
-
-    async def get_product_for_scoring(self, product_id: str) -> dict | None:
-        """Retorna dados completos de um produto para scoring."""
-        try:
-            cursor = await self._db.execute(
-                "SELECT * FROM products WHERE id = ?",
-                (product_id,),
-            )
-            row = await cursor.fetchone()
-            return dict(row) if row else None
-        except Exception as exc:
-            raise SQLiteError(
-                str(exc), operation="get_product_for_scoring"
-            ) from exc
-
-    async def get_products_needing_retry(
-        self, max_attempts: int = 3, batch_size: int = 5
-    ) -> list[dict]:
-        """Retorna produtos com falha que ainda podem ser retentados."""
-        try:
-            cursor = await self._db.execute(
-                """
-                SELECT id, ml_id, product_url, enrichment_attempts
-                FROM products
-                WHERE enrichment_status = 'failed'
-                  AND enrichment_attempts < ?
-                ORDER BY last_seen_at DESC
-                LIMIT ?
-                """,
-                (max_attempts, batch_size),
-            )
-            rows = await cursor.fetchall()
-            return [dict(row) for row in rows]
-        except Exception as exc:
-            raise SQLiteError(
-                str(exc), operation="get_products_needing_retry"
-            ) from exc
-
-    async def reset_stale_claims(self, stale_minutes: int = 30) -> int:
-        """Reseta produtos in_progress por tempo demais (crash recovery)."""
-        cutoff = (
-            datetime.now(tz=timezone.utc) - timedelta(minutes=stale_minutes)
-        ).isoformat()
-        try:
-            cursor = await self._db.execute(
-                """
-                UPDATE products
-                SET enrichment_status = 'pending', synced = 0
-                WHERE enrichment_status = 'in_progress'
-                  AND last_seen_at < ?
-                """,
-                (cutoff,),
-            )
-            await self._db.commit()
-            count = cursor.rowcount
-            if count > 0:
-                logger.info("sqlite_stale_claims_reset", count=count)
-            return count
-        except Exception as exc:
-            raise SQLiteError(
-                str(exc), operation="reset_stale_claims"
             ) from exc
 
     # ------------------------------------------------------------------

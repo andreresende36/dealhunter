@@ -8,8 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.scraper.base_scraper import BaseScraper, ScrapedProduct, USER_AGENTS
 from bs4 import Tag
-from src.scraper.ofertas_do_dia import OfertasDoDiaScraper
-from src.scraper.categoria_moda import CategoriaModaScraper
+from src.scraper.ml_scraper import MLScraper, ScrapeSource
 
 
 # ---------------------------------------------------------------------------
@@ -29,7 +28,6 @@ def sample_product() -> ScrapedProduct:
         review_count=1234,
         category="Calçados",
         free_shipping=True,
-        is_official_store=True,
         source="ofertas_do_dia",
     )
 
@@ -195,11 +193,16 @@ def html_with_pagination() -> str:
     """
 
 
-def _make_scraper() -> OfertasDoDiaScraper:
+_DEFAULT_SOURCE = ScrapeSource(
+    name="ofertas_do_dia",
+    url="https://www.mercadolivre.com.br/ofertas",
+    max_pages=2,
+)
+
+
+def _make_scraper() -> MLScraper:
     """Cria scraper sem chamar __init__ (para testes de parsing puro)."""
-    scraper = OfertasDoDiaScraper.__new__(OfertasDoDiaScraper)
-    scraper.cfg = MagicMock()
-    scraper.max_pages = 3
+    scraper = MLScraper.__new__(MLScraper)
     scraper._storage = None
     scraper._request_count = 0
     scraper._last_user_agent = ""
@@ -415,12 +418,12 @@ class TestParsePagePoly:
         self.scraper = _make_scraper()
 
     def test_parse_extracts_valid_products(self, html_poly_cards):
-        products = self.scraper._parse_page(html_poly_cards)
+        products = self.scraper._parse_page(html_poly_cards, _DEFAULT_SOURCE)
         # 3 produtos válidos (2 inválidos são ignorados)
         assert len(products) == 3
 
     def test_first_product_fields(self, html_poly_cards):
-        products = self.scraper._parse_page(html_poly_cards)
+        products = self.scraper._parse_page(html_poly_cards, _DEFAULT_SOURCE)
         p = products[0]
         assert p.ml_id == "MLB111222333"
         assert p.title == "Tênis Nike Air Max 270 Masculino"
@@ -432,7 +435,7 @@ class TestParsePagePoly:
         assert p.source == "ofertas_do_dia"
 
     def test_second_product_thousands(self, html_poly_cards):
-        products = self.scraper._parse_page(html_poly_cards)
+        products = self.scraper._parse_page(html_poly_cards, _DEFAULT_SOURCE)
         p = products[1]
         assert p.ml_id == "MLB444555666"
         assert p.price == 1299.0
@@ -441,7 +444,7 @@ class TestParsePagePoly:
         assert p.url.startswith("https://")  # URL relativa convertida
 
     def test_third_product_dash_in_id(self, html_poly_cards):
-        products = self.scraper._parse_page(html_poly_cards)
+        products = self.scraper._parse_page(html_poly_cards, _DEFAULT_SOURCE)
         p = products[2]
         # MLB-777888999 normalizado para MLB777888999
         assert p.ml_id == "MLB777888999"
@@ -450,14 +453,14 @@ class TestParsePagePoly:
         assert p.free_shipping is True
 
     def test_invalid_items_excluded(self, html_poly_cards):
-        products = self.scraper._parse_page(html_poly_cards)
+        products = self.scraper._parse_page(html_poly_cards, _DEFAULT_SOURCE)
         ml_ids = [p.ml_id for p in products]
         # Produto sem link e produto sem título não devem aparecer
         assert "MLB000111222" not in ml_ids
         assert len(products) == 3
 
     def test_empty_page(self, html_no_products):
-        products = self.scraper._parse_page(html_no_products)
+        products = self.scraper._parse_page(html_no_products, _DEFAULT_SOURCE)
         assert products == []
 
 
@@ -471,7 +474,7 @@ class TestParsePageLegacy:
         self.scraper = _make_scraper()
 
     def test_legacy_selectors_work(self, html_legacy_selectors):
-        products = self.scraper._parse_page(html_legacy_selectors)
+        products = self.scraper._parse_page(html_legacy_selectors, _DEFAULT_SOURCE)
         assert len(products) == 1
         p = products[0]
         assert p.ml_id == "MLB999000111"
@@ -499,7 +502,7 @@ class TestDeduplication:
         mock_storage.get_product_id = AsyncMock(return_value="uuid-new")
         mock_storage.log_event = AsyncMock(return_value=True)
 
-        scraper = OfertasDoDiaScraper(max_pages=1, storage=mock_storage)
+        scraper = MLScraper(storage=mock_storage)
 
         mock_page = AsyncMock()
         mock_page.content = AsyncMock(return_value=html_poly_cards)
@@ -536,7 +539,7 @@ class TestDeduplication:
     @pytest.mark.asyncio
     async def test_no_storage_returns_all(self, html_poly_cards):
         """Sem storage, retorna todos os produtos sem dedup."""
-        scraper = OfertasDoDiaScraper(max_pages=1, storage=None)
+        scraper = MLScraper()
 
         mock_page = AsyncMock()
         mock_page.content = AsyncMock(return_value=html_poly_cards)
@@ -576,7 +579,7 @@ class TestRetryAndErrors:
         mock_storage = AsyncMock()
         mock_storage.log_event = AsyncMock(return_value=True)
 
-        scraper = OfertasDoDiaScraper(max_pages=3, storage=mock_storage)
+        scraper = MLScraper(storage=mock_storage)
 
         mock_page = AsyncMock()
         mock_page.close = AsyncMock()
@@ -604,7 +607,7 @@ class TestRetryAndErrors:
     @pytest.mark.asyncio
     async def test_goto_failure_stops_page(self):
         """Falha no _goto deve parar a iteração sem crashar."""
-        scraper = OfertasDoDiaScraper(max_pages=3)
+        scraper = MLScraper()
 
         mock_page = AsyncMock()
         mock_page.close = AsyncMock()
@@ -627,7 +630,7 @@ class TestRetryAndErrors:
     @pytest.mark.asyncio
     async def test_no_cards_stops_page(self):
         """Timeout ao esperar cards deve parar a iteração."""
-        scraper = OfertasDoDiaScraper(max_pages=3)
+        scraper = MLScraper()
 
         mock_page = AsyncMock()
         mock_page.wait_for_selector = AsyncMock(
@@ -660,7 +663,7 @@ class TestScrapeIntegration:
     @pytest.mark.asyncio
     async def test_full_scrape_single_page(self, html_poly_cards):
         """Testa o fluxo completo: navegar → parsear → retornar produtos."""
-        scraper = OfertasDoDiaScraper(max_pages=1)
+        scraper = MLScraper()
 
         mock_page = AsyncMock()
         mock_page.content = AsyncMock(return_value=html_poly_cards)
@@ -695,7 +698,7 @@ class TestScrapeIntegration:
     @pytest.mark.asyncio
     async def test_multi_page_scrape(self, html_poly_cards, html_no_products):
         """Testa navegação multi-página: para quando não há mais produtos."""
-        scraper = OfertasDoDiaScraper(max_pages=3)
+        scraper = MLScraper()
 
         mock_page = AsyncMock()
         # Página 1: tem produtos; Página 2: vazia (para)
@@ -749,7 +752,7 @@ class TestScrapeIntegration:
         mock_storage.get_product_id = AsyncMock(return_value="uuid-123")
         mock_storage.log_event = AsyncMock(return_value=True)
 
-        scraper = OfertasDoDiaScraper(max_pages=1, storage=mock_storage)
+        scraper = MLScraper(storage=mock_storage)
 
         mock_page = AsyncMock()
         mock_page.content = AsyncMock(return_value=html_poly_cards)
@@ -781,39 +784,12 @@ class TestScrapeIntegration:
         mock_storage.log_event.assert_any_call(
             "scrape_success",
             {
-                "source": "ofertas_do_dia",
                 "total": 3,
+                "sources": 1,
                 "dupes_skipped": 0,
                 "elapsed_seconds": pytest.approx(0, abs=10),
             },
         )
-
-
-# ===========================================================================
-# CategoriaModaScraper — testes básicos de parsing
-# ===========================================================================
-
-
-class TestCategoriaModaScraper:
-    def setup_method(self):
-        self.scraper = CategoriaModaScraper.__new__(CategoriaModaScraper)
-        self.scraper.min_discount_pct = 15.0
-
-    def test_build_url_page_1(self):
-        url = self.scraper._build_url("MLB1430", 1)
-        assert "MLB1430" in url
-        assert "_from" not in url
-
-    def test_build_url_page_2_has_offset(self):
-        url = self.scraper._build_url("MLB1430", 2)
-        assert "_from=48" in url
-
-    def test_extract_ml_id(self):
-        url = "https://www.mercadolivre.com.br/bolsa/p/MLB999888777"
-        assert self.scraper._extract_ml_id(url) == "MLB999888777"
-
-    def test_clean_price_br_format(self):
-        assert self.scraper._clean_price("1.499,99") == 1499.99
 
 
 # ===========================================================================

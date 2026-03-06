@@ -3,15 +3,12 @@ DealHunter — Score Engine
 Sistema de pontuação por regras para filtrar e priorizar ofertas.
 Pontuação de 0 a 100. Ofertas abaixo do mínimo são descartadas.
 
-Critérios e pesos:
-  - Desconto (%)              → até 30 pts
-  - Reputação do vendedor     → até 15 pts
-  - Avaliação (estrelas)      → até 15 pts
-  - Frete grátis              → 10 pts
-  - Quantidade vendida        → até 10 pts
-  - Nº de reviews             → até 10 pts
-  - Loja oficial              →  5 pts
-  - Qualidade do título       → até 5 pts
+Critérios e pesos (soma = 100):
+  - Desconto (%)              → até 40 pts  (SCORE_WEIGHT_DISCOUNT)
+  - Avaliação (estrelas)      → até 25 pts  (SCORE_WEIGHT_RATING)
+  - Nº de reviews             → até 15 pts  (SCORE_WEIGHT_REVIEWS)
+  - Frete grátis              → 10 pts      (SCORE_WEIGHT_FREE_SHIPPING)
+  - Qualidade do título       → até 10 pts  (SCORE_WEIGHT_TITLE_QUALITY)
 """
 
 import re
@@ -31,24 +28,18 @@ class ScoreBreakdown:
     """Detalhamento da pontuação por critério (pesos configuráveis via .env)."""
 
     discount: float = 0.0
-    seller_reputation: float = 0.0
     rating: float = 0.0
     free_shipping: float = 0.0
-    sold_quantity: float = 0.0
     reviews: float = 0.0
-    official_store: float = 0.0
     title_quality: float = 0.0
 
     @property
     def total(self) -> float:
         return (
             self.discount
-            + self.seller_reputation
             + self.rating
             + self.free_shipping
-            + self.sold_quantity
             + self.reviews
-            + self.official_store
             + self.title_quality
         )
 
@@ -70,12 +61,9 @@ class ScoredProduct:
                 "score": self.score,
                 "score_breakdown": {
                     "discount": self.breakdown.discount,
-                    "seller_reputation": self.breakdown.seller_reputation,
                     "rating": self.breakdown.rating,
                     "free_shipping": self.breakdown.free_shipping,
-                    "sold_quantity": self.breakdown.sold_quantity,
                     "reviews": self.breakdown.reviews,
-                    "official_store": self.breakdown.official_store,
                     "title_quality": self.breakdown.title_quality,
                 },
                 "passed": self.passed,
@@ -103,36 +91,21 @@ class ScoreEngine:
         """Calcula o score de um produto e decide se passa no filtro."""
         breakdown = ScoreBreakdown()
 
-        # 1. Pontuação por desconto (30 pts máx)
+        # 1. Pontuação por desconto (40 pts máx)
         breakdown.discount = self._score_discount(product.discount_pct)
 
-        # 2. Reputação do vendedor (15 pts máx)
-        breakdown.seller_reputation = self._score_seller_reputation(
-            product.seller_reputation
-        )
-
-        # 3. Pontuação por avaliação (15 pts máx)
+        # 2. Pontuação por avaliação (25 pts máx)
         breakdown.rating = self._score_rating(product.rating)
+
+        # 3. Pontuação por número de reviews (15 pts máx)
+        breakdown.reviews = self._score_reviews(product.review_count)
 
         # 4. Bônus frete grátis (10 pts)
         breakdown.free_shipping = (
             self.cfg.weight_free_shipping if product.free_shipping else 0.0
         )
 
-        # 5. Quantidade vendida (10 pts máx)
-        breakdown.sold_quantity = self._score_sold_quantity(
-            product.sold_quantity
-        )
-
-        # 6. Pontuação por número de reviews (10 pts máx)
-        breakdown.reviews = self._score_reviews(product.review_count)
-
-        # 7. Bônus loja oficial (5 pts)
-        breakdown.official_store = (
-            self.cfg.weight_official_store if product.is_official_store else 0.0
-        )
-
-        # 8. Qualidade do título (5 pts máx)
+        # 5. Qualidade do título (10 pts máx)
         breakdown.title_quality = self._score_title(product.title)
 
         score = round(breakdown.total, 1)
@@ -177,22 +150,6 @@ class ScoreEngine:
     # ------------------------------------------------------------------
     # Critérios de pontuação
     # ------------------------------------------------------------------
-
-    def _score_seller_reputation(self, reputation: str) -> float:
-        """platinum → max pts, gold → 66%, silver → 33%, sem → 0."""
-        max_pts = self.cfg.weight_seller_reputation
-        tiers = {"platinum": 1.0, "gold": 0.66, "silver": 0.33}
-        multiplier = tiers.get(reputation.lower(), 0.0) if reputation else 0.0
-        return round(max_pts * multiplier, 1)
-
-    def _score_sold_quantity(self, qty: int) -> float:
-        """Escala linear: 0 → 0pts, 500+ → max pts."""
-        max_pts = self.cfg.weight_sold_quantity
-        if qty <= 0:
-            return 0.0
-        if qty >= 500:
-            return max_pts
-        return round(min(qty / 500 * max_pts, max_pts), 1)
 
     def _score_discount(self, pct: float) -> float:
         """Escala linear: 0% → 0pts, 80%+ → max pts."""

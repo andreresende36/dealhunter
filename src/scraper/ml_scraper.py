@@ -1,16 +1,10 @@
 """
 DealHunter — Scraper Unificado do Mercado Livre
-Coleta ofertas de múltiplas fontes (Ofertas do Dia, Categorias) com
-extração padronizada de todos os campos.
+Coleta ofertas do Mercado Livre (Ofertas do Dia) com extração
+padronizada de todos os campos dos cards de listagem.
 
 Uso:
-    # Fontes padrão (ofertas + categorias configuradas):
     scraper = MLScraper()
-    products = await scraper.scrape()
-
-    # Fontes customizadas:
-    sources = [ScrapeSource(name="ofertas", url="https://...")]
-    scraper = MLScraper(sources=sources)
     products = await scraper.scrape()
 """
 
@@ -18,9 +12,8 @@ from __future__ import annotations
 
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
-from urllib.parse import urlencode
 
 if TYPE_CHECKING:
     from src.database.storage_manager import StorageManager
@@ -29,7 +22,6 @@ import structlog
 from bs4 import BeautifulSoup, Tag
 from playwright.async_api import Page
 
-from src.config import settings
 from .base_scraper import BaseScraper, CaptchaError, RateLimitError, ScrapedProduct
 
 logger = structlog.get_logger(__name__)
@@ -39,17 +31,6 @@ logger = structlog.get_logger(__name__)
 # Configuração de fonte de scraping
 # ---------------------------------------------------------------------------
 
-# Subcategorias de Moda com seus IDs no ML
-SUBCATEGORIES = {
-    "MLB1574": "Calçados",
-    "MLB1577": "Roupas Masculinas",
-    "MLB1578": "Roupas Femininas",
-    "MLB1579": "Acessórios de Moda",
-    "MLB1580": "Bolsas e Mochilas",
-    "MLB1581": "Óculos e Lunetas",
-    "MLB1582": "Relógios",
-    "MLB1583": "Joias e Bijuterias",
-}
 
 OFERTAS_URL = "https://www.mercadolivre.com.br/ofertas"
 
@@ -58,12 +39,9 @@ OFERTAS_URL = "https://www.mercadolivre.com.br/ofertas"
 class ScrapeSource:
     """Configuração de uma fonte de scraping."""
 
-    name: str  # Ex: "ofertas_do_dia", "Calçados"
+    name: str  # Ex: "ofertas_do_dia"
     url: str  # URL base da fonte
-    max_pages: int = 3
-    pagination: str = "link"  # "link" | "offset"
-    category: str = ""  # Categoria para o ScrapedProduct
-    search_params: dict = field(default_factory=dict)
+    max_pages: int = 20
 
 
 # ---------------------------------------------------------------------------
@@ -88,19 +66,14 @@ SELECTORS = {
     ),
     # Link do produto
     "link": (
-        "a.poly-component__title, "
-        "a.ui-search-link, "
-        "a[href*='mercadolivre']"
+        "a.poly-component__title, " "a.ui-search-link, " "a[href*='mercadolivre']"
     ),
     # Preço atual — container andes (fraction + cents)
     "price_current_container": ".poly-price__current",
     "fraction": ".andes-money-amount__fraction",
     "cents": ".andes-money-amount__cents",
     # Preço original (riscado) — poly- e ui-search-
-    "price_original_container": (
-        "s.poly-price__original, "
-        ".poly-price__comparison"
-    ),
+    "price_original_container": ("s.poly-price__original, " ".poly-price__comparison"),
     "price_original_search": (
         "del.ui-search-price__original-value "
         "span.andes-money-amount__fraction, "
@@ -129,21 +102,14 @@ SELECTORS = {
         "img.ui-search-result-image__element, "
         "img[data-src]"
     ),
-    # Avaliação e reviews
-    "rating": "span.ui-search-reviews__rating-number",
-    "review_count": "span.ui-search-reviews__amount",
-    # Vendedor
-    "seller_name": "span.ui-search-item__seller-name",
-    "official_store": (
-        "span.ui-search-official-store-label, "
-        "span[class*='official-store']"
-    ),
+    # Avaliação e reviews (poly- + ui-search- fallbacks)
+    "rating": (".poly-reviews__rating, " "span.ui-search-reviews__rating-number"),
+    "review_count": (".poly-reviews__total, " "span.ui-search-reviews__amount"),
     # Badges
     "badge": "span.poly-component__highlight",
     # Paginação (link-based)
     "next_page": (
-        "a.andes-pagination__link--next, "
-        "li.andes-pagination__button--next a"
+        "a.andes-pagination__link--next, " "li.andes-pagination__button--next a"
     ),
     "pagination_links": "a.andes-pagination__link",
 }
@@ -158,17 +124,13 @@ class MLScraper(BaseScraper):
     """
     Scraper unificado do Mercado Livre.
 
-    Coleta ofertas de múltiplas fontes (Ofertas do Dia, Categorias)
-    com extração padronizada de todos os campos disponíveis nos cards.
+    Coleta ofertas do dia com extração padronizada de todos os campos
+    disponíveis nos cards de listagem.
 
     Campos extraídos de cada card:
     - ml_id, url, title, price, original_price, discount_pct
-    - rating, review_count, seller, is_official_store
-    - free_shipping, image_url, category
+    - rating, review_count, seller, free_shipping, image_url
     """
-
-    # Items por página nas buscas por categoria do ML
-    ITEMS_PER_PAGE = 48
 
     def __init__(
         self,
@@ -180,38 +142,14 @@ class MLScraper(BaseScraper):
         self.sources = sources or self._default_sources()
 
     def _default_sources(self) -> list[ScrapeSource]:
-        """Gera fontes padrão: Ofertas do Dia + categorias configuradas."""
-        sources: list[ScrapeSource] = []
-
-        # Ofertas do Dia
-        sources.append(
+        """Gera fontes padrão: Ofertas do Dia."""
+        return [
             ScrapeSource(
                 name="ofertas_do_dia",
                 url=OFERTAS_URL,
-                max_pages=2,
-                pagination="link",
+                max_pages=20,
             )
-        )
-
-        # Categorias (subcategorias de Moda)
-        for category_id in settings.mercado_livre.category_ids:
-            category_name = SUBCATEGORIES.get(category_id, category_id)
-            base_url = f"{self.ML_BASE_URL}/c/{category_id.upper()}"
-            sources.append(
-                ScrapeSource(
-                    name=category_name,
-                    url=base_url,
-                    max_pages=1,
-                    pagination="offset",
-                    category=category_name,
-                    search_params={
-                        "sort": "relevance",
-                        "discount": "10-100",
-                    },
-                )
-            )
-
-        return sources
+        ]
 
     async def _new_page(self) -> Page:
         """Cria nova página com playwright-stealth aplicado."""
@@ -248,7 +186,6 @@ class MLScraper(BaseScraper):
                     logger.info(
                         "scraping_source",
                         source=source.name,
-                        pagination=source.pagination,
                         max_pages=source.max_pages,
                     )
 
@@ -266,9 +203,7 @@ class MLScraper(BaseScraper):
                             count=len(products),
                         )
                     except CaptchaError:
-                        logger.error(
-                            "captcha_blocked", source=source.name
-                        )
+                        logger.error("captcha_blocked", source=source.name)
                         if self._storage:
                             await self._storage.log_event(
                                 "scrape_error",
@@ -279,9 +214,7 @@ class MLScraper(BaseScraper):
                             )
                         total_errors += 1
                     except RateLimitError:
-                        logger.error(
-                            "rate_limited", source=source.name
-                        )
+                        logger.error("rate_limited", source=source.name)
                         if self._storage:
                             await self._storage.log_event(
                                 "scrape_error",
@@ -299,8 +232,11 @@ class MLScraper(BaseScraper):
                         )
                         total_errors += 1
 
-                    # Delay entre fontes
+                    # Delay entre fontes + rotação segura de contexto
                     await self._random_delay(extra_min=1.0, extra_max=2.0)
+                    await page.close()
+                    await self._rotate_context_if_needed()
+                    page = await self._new_page()
 
             finally:
                 await page.close()
@@ -358,15 +294,12 @@ class MLScraper(BaseScraper):
                 break
 
             if await self._is_blocked(page):
-                raise CaptchaError(
-                    f"CAPTCHA detectado em {source.name}"
-                )
+                raise CaptchaError(f"CAPTCHA detectado em {source.name}")
 
             # Aguarda os cards carregarem
             try:
                 await page.wait_for_selector(
-                    "div.poly-card, li.promotion-item, "
-                    "li.ui-search-layout__item",
+                    "div.poly-card, li.promotion-item, " "li.ui-search-layout__item",
                     timeout=15_000,
                 )
             except Exception:
@@ -393,9 +326,7 @@ class MLScraper(BaseScraper):
             for p in page_products:
                 if self._storage:
                     try:
-                        is_dupe = await self._storage.check_duplicate(
-                            p.ml_id
-                        )
+                        is_dupe = await self._storage.check_duplicate(p.ml_id)
                         if is_dupe:
                             dupes_skipped += 1
                             continue
@@ -415,9 +346,7 @@ class MLScraper(BaseScraper):
                 break
 
             # Próxima página
-            next_url = await self._resolve_next_page(
-                page, source, page_num
-            )
+            next_url = await self._resolve_next_page(page, source, page_num)
             if not next_url:
                 logger.info(
                     "no_more_pages",
@@ -437,16 +366,6 @@ class MLScraper(BaseScraper):
 
     def _build_url(self, source: ScrapeSource, page_num: int) -> str:
         """Constrói URL para a página solicitada."""
-        if source.pagination == "offset" and page_num > 1:
-            offset = (page_num - 1) * self.ITEMS_PER_PAGE
-            params = {**source.search_params, "_from": str(offset)}
-            query = urlencode(params)
-            return f"{source.url}?{query}"
-
-        if source.search_params:
-            query = urlencode(source.search_params)
-            return f"{source.url}?{query}"
-
         return source.url
 
     async def _resolve_next_page(
@@ -455,13 +374,7 @@ class MLScraper(BaseScraper):
         source: ScrapeSource,
         current_page: int,
     ) -> str | None:
-        """Resolve URL da próxima página conforme tipo de paginação."""
-        if source.pagination == "offset":
-            if current_page < source.max_pages:
-                return self._build_url(source, current_page + 1)
-            return None
-
-        # Paginação por link (ofertas do dia)
+        """Resolve URL da próxima página via link."""
         return await self._get_next_page_url(page)
 
     async def _get_next_page_url(self, page: Page) -> str | None:
@@ -472,16 +385,10 @@ class MLScraper(BaseScraper):
                 if el:
                     href = await el.get_attribute("href")
                     if href:
-                        return (
-                            self.full_url(href)
-                            if href.startswith("/")
-                            else href
-                        )
+                        return self.full_url(href) if href.startswith("/") else href
 
             # Fallback: procura link com texto "Seguinte"
-            links = await page.query_selector_all(
-                SELECTORS["pagination_links"]
-            )
+            links = await page.query_selector_all(SELECTORS["pagination_links"])
             for link in links:
                 text = (await link.inner_text()).strip().lower()
                 if text in (
@@ -492,11 +399,7 @@ class MLScraper(BaseScraper):
                 ):
                     href = await link.get_attribute("href")
                     if href:
-                        return (
-                            self.full_url(href)
-                            if href.startswith("/")
-                            else href
-                        )
+                        return self.full_url(href) if href.startswith("/") else href
 
         except Exception as exc:
             logger.debug("pagination_check_error", error=str(exc))
@@ -507,9 +410,7 @@ class MLScraper(BaseScraper):
     # Parsing unificado
     # ------------------------------------------------------------------
 
-    def _parse_page(
-        self, html: str, source: ScrapeSource
-    ) -> list[ScrapedProduct]:
+    def _parse_page(self, html: str, source: ScrapeSource) -> list[ScrapedProduct]:
         """Extrai todos os produtos do HTML com seletores unificados."""
         soup = BeautifulSoup(html, "lxml")
         products: list[ScrapedProduct] = []
@@ -522,16 +423,13 @@ class MLScraper(BaseScraper):
 
         return products
 
-    def _parse_item(
-        self, item: Tag, source: ScrapeSource
-    ) -> Optional[ScrapedProduct]:
+    def _parse_item(self, item: Tag, source: ScrapeSource) -> Optional[ScrapedProduct]:
         """
         Extrai TODOS os campos de um card de produto.
 
         Extração padronizada independente da fonte:
         ml_id, url, title, price, original_price, discount_pct,
-        rating, review_count, seller, is_official_store,
-        free_shipping, image_url, category.
+        rating, review_count, seller, free_shipping, image_url, category.
         """
         try:
             # --- URL e ML ID ---
@@ -565,9 +463,7 @@ class MLScraper(BaseScraper):
 
             # --- Desconto explícito ---
             discount_tag = item.select_one(SELECTORS["discount"])
-            discount_text = (
-                discount_tag.get_text(strip=True) if discount_tag else ""
-            )
+            discount_text = discount_tag.get_text(strip=True) if discount_tag else ""
             explicit_discount = self._parse_discount_pct(discount_text)
 
             # --- Avaliação ---
@@ -575,18 +471,6 @@ class MLScraper(BaseScraper):
 
             # --- Reviews ---
             review_count = self._parse_review_count(item)
-
-            # --- Vendedor ---
-            seller_name_tag = item.select_one(SELECTORS["seller_name"])
-            seller = (
-                seller_name_tag.get_text(strip=True)
-                if seller_name_tag
-                else ""
-            )
-
-            # --- Loja oficial ---
-            official_tag = item.select_one(SELECTORS["official_store"])
-            is_official = official_tag is not None
 
             # --- Frete grátis ---
             shipping_tag = item.select_one(SELECTORS["shipping"])
@@ -599,11 +483,11 @@ class MLScraper(BaseScraper):
             img_tag = item.select_one(SELECTORS["image"])
             image_url = ""
             if img_tag:
-                image_url = str(
-                    img_tag.get("data-src")
-                    or img_tag.get("src")
-                    or ""
-                )
+                image_url = str(img_tag.get("data-src") or img_tag.get("src") or "")
+
+            # --- Badge ---
+            badge_tag = item.select_one(SELECTORS["badge"])
+            badge = badge_tag.get_text(strip=True) if badge_tag else ""
 
             # --- Montar produto ---
             product = ScrapedProduct(
@@ -614,9 +498,7 @@ class MLScraper(BaseScraper):
                 original_price=original_price,
                 rating=rating,
                 review_count=review_count,
-                seller=seller,
-                is_official_store=is_official,
-                category=source.category,
+                category=source.name,
                 image_url=image_url,
                 free_shipping=free_shipping,
                 source=source.name,
@@ -639,9 +521,7 @@ class MLScraper(BaseScraper):
     def _get_current_price(self, card: Tag) -> float | None:
         """Extrai o preço atual de um card (fraction + cents se disponível)."""
         # Estratégia 1: container .poly-price__current
-        container = card.select_one(
-            SELECTORS["price_current_container"]
-        )
+        container = card.select_one(SELECTORS["price_current_container"])
         if container:
             price = self._price_from_andes(container)
             if price:
@@ -650,18 +530,14 @@ class MLScraper(BaseScraper):
         # Estratégia 2: primeiro fraction que NÃO esteja em <s>/<del>
         for fraction in card.select(SELECTORS["fraction"]):
             if not fraction.find_parent(["s", "del"]):
-                return self._clean_price(
-                    fraction.get_text(strip=True)
-                )
+                return self._clean_price(fraction.get_text(strip=True))
 
         return None
 
     def _get_original_price(self, card: Tag) -> float | None:
         """Extrai o preço original (riscado / antes do desconto)."""
         # Estratégia 1: container poly-price__original
-        for selector in SELECTORS["price_original_container"].split(
-            ", "
-        ):
+        for selector in SELECTORS["price_original_container"].split(", "):
             container = card.select_one(selector)
             if container:
                 price = self._price_from_andes(container)
@@ -680,9 +556,7 @@ class MLScraper(BaseScraper):
             if parent:
                 fraction = parent.select_one(SELECTORS["fraction"])
                 if fraction:
-                    return self._clean_price(
-                        fraction.get_text(strip=True)
-                    )
+                    return self._clean_price(fraction.get_text(strip=True))
 
         return None
 
@@ -709,9 +583,7 @@ class MLScraper(BaseScraper):
 
         cents_el = container.select_one(SELECTORS["cents"])
         if cents_el:
-            cents_text = (
-                cents_el.get_text(strip=True).lstrip(",").strip()
-            )
+            cents_text = cents_el.get_text(strip=True).lstrip(",").strip()
             try:
                 return float(base) + int(cents_text) / 100
             except ValueError:

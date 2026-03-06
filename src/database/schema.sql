@@ -31,8 +31,6 @@ CREATE TABLE IF NOT EXISTS products (
     original_price      DECIMAL(10,2),
     discount_percent    INTEGER     DEFAULT 0,
     seller_name         TEXT        DEFAULT '',
-    seller_reputation   TEXT        DEFAULT '',    -- "platinum" | "gold" | "silver" | ""
-    sold_quantity       INTEGER     DEFAULT 0,
     rating_stars        DECIMAL(3,1) DEFAULT 0,
     rating_count        INTEGER     DEFAULT 0,
     free_shipping       BOOLEAN     DEFAULT FALSE,
@@ -41,15 +39,7 @@ CREATE TABLE IF NOT EXISTS products (
     category            TEXT        DEFAULT '',
     first_seen_at       TIMESTAMPTZ DEFAULT NOW(),
     last_seen_at        TIMESTAMPTZ DEFAULT NOW(),
-    created_at          TIMESTAMPTZ DEFAULT NOW(),
-    enrichment_status   TEXT        NOT NULL DEFAULT 'pending'
-                        CHECK (enrichment_status IN (
-                            'pending', 'in_progress', 'enriched',
-                            'scored', 'published', 'failed', 'skipped'
-                        )),
-    enrichment_attempts INTEGER     NOT NULL DEFAULT 0,
-    enrichment_error    TEXT        DEFAULT '',
-    enriched_at         TIMESTAMPTZ
+    created_at          TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Índices de products
@@ -67,13 +57,6 @@ CREATE INDEX IF NOT EXISTS idx_products_category
 
 CREATE INDEX IF NOT EXISTS idx_products_price
     ON products(current_price);
-
-CREATE INDEX IF NOT EXISTS idx_products_enrichment_status
-    ON products(enrichment_status);
-
-CREATE INDEX IF NOT EXISTS idx_products_enrichment_pending
-    ON products(enrichment_status, last_seen_at DESC)
-    WHERE enrichment_status IN ('pending', 'failed');
 
 -- Trigger: preserva first_seen_at e atualiza last_seen_at automaticamente nos UPDATEs
 CREATE OR REPLACE FUNCTION fn_products_on_update()

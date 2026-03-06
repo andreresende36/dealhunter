@@ -28,7 +28,7 @@ from src.config import settings
 from src.scraper.base_scraper import ScrapedProduct
 from .supabase_client import SupabaseClient
 from .sqlite_fallback import SQLiteFallback
-from .exceptions import SupabaseError
+from .exceptions import SQLiteError, SupabaseError
 
 logger = structlog.get_logger(__name__)
 
@@ -192,9 +192,20 @@ class StorageManager:
         original_price: float | None = None,
     ) -> bool:
         """Registra o preço atual em ambos os bancos."""
-        local_ok = await self._sqlite.add_price_history(
-            product_id, price, original_price
-        )
+        local_ok = False
+        try:
+            local_ok = await self._sqlite.add_price_history(
+                product_id, price, original_price
+            )
+        except SQLiteError as exc:
+            if "FOREIGN KEY" in str(exc):
+                logger.warning(
+                    "sqlite_fk_skip",
+                    product_id=product_id,
+                    table="price_history",
+                )
+            else:
+                raise
         if self._using_supabase:
             try:
                 return await self._supabase.add_price_history(
@@ -231,18 +242,27 @@ class StorageManager:
 
         Returns:
             UUID do scored_offer.
-
-        Raises:
-            SQLiteError: se o SQLite local falhar.
         """
-        local_id = await self._sqlite.save_scored_offer(
-            product_id,
-            rule_score,
-            final_score,
-            status,
-            ai_score,
-            ai_description,
-        )
+        local_id = None
+        try:
+            local_id = await self._sqlite.save_scored_offer(
+                product_id,
+                rule_score,
+                final_score,
+                status,
+                ai_score,
+                ai_description,
+            )
+        except SQLiteError as exc:
+            if "FOREIGN KEY" in str(exc):
+                logger.warning(
+                    "sqlite_fk_skip",
+                    product_id=product_id,
+                    table="scored_offers",
+                )
+            else:
+                raise
+
         if self._using_supabase:
             try:
                 remote_id = await self._supabase.save_scored_offer(
@@ -257,7 +277,7 @@ class StorageManager:
             except SupabaseError as exc:
                 logger.warning("supabase_scored_offer_failed", error=str(exc))
 
-        return local_id
+        return local_id or ""
 
     # ------------------------------------------------------------------
     # sent_offers
@@ -270,9 +290,20 @@ class StorageManager:
         shlink_short_url: str = "",
     ) -> bool:
         """Registra o envio em ambos os bancos."""
-        local_ok = await self._sqlite.mark_as_sent(
-            scored_offer_id, channel, shlink_short_url
-        )
+        local_ok = False
+        try:
+            local_ok = await self._sqlite.mark_as_sent(
+                scored_offer_id, channel, shlink_short_url
+            )
+        except SQLiteError as exc:
+            if "FOREIGN KEY" in str(exc):
+                logger.warning(
+                    "sqlite_fk_skip",
+                    scored_offer_id=scored_offer_id,
+                    table="sent_offers",
+                )
+            else:
+                raise
         if self._using_supabase:
             try:
                 return await self._supabase.mark_as_sent(
@@ -290,101 +321,6 @@ class StorageManager:
             except SupabaseError:
                 pass
         return await self._sqlite.was_recently_sent(ml_id, hours)
-
-    # ------------------------------------------------------------------
-    # Enrichment queue (deep scrape worker)
-    # ------------------------------------------------------------------
-
-    async def claim_for_enrichment(self, batch_size: int = 10) -> list[dict]:
-        """Reclama um lote de produtos pendentes para enriquecimento."""
-        if self._using_supabase:
-            try:
-                return await self._supabase.claim_for_enrichment(batch_size)
-            except SupabaseError as exc:
-                logger.warning("supabase_claim_failed", error=str(exc))
-        return await self._sqlite.claim_for_enrichment(batch_size)
-
-    async def set_enrichment_status(
-        self, product_id: str, status: str, error: str = ""
-    ) -> bool:
-        """Atualiza o status de enriquecimento em ambos os bancos."""
-        local_ok = await self._sqlite.set_enrichment_status(
-            product_id, status, error
-        )
-        if self._using_supabase:
-            try:
-                return await self._supabase.set_enrichment_status(
-                    product_id, status, error
-                )
-            except SupabaseError as exc:
-                logger.warning(
-                    "supabase_set_enrichment_status_failed", error=str(exc)
-                )
-        return local_ok
-
-    async def increment_enrichment_attempts(self, product_id: str) -> bool:
-        """Incrementa o contador de tentativas em ambos os bancos."""
-        local_ok = await self._sqlite.increment_enrichment_attempts(product_id)
-        if self._using_supabase:
-            try:
-                return await self._supabase.increment_enrichment_attempts(
-                    product_id
-                )
-            except SupabaseError as exc:
-                logger.warning(
-                    "supabase_increment_attempts_failed", error=str(exc)
-                )
-        return local_ok
-
-    async def update_enriched_data(self, product_id: str, data: dict) -> bool:
-        """Atualiza um produto com dados do deep scrape em ambos os bancos."""
-        local_ok = await self._sqlite.update_enriched_data(product_id, data)
-        if self._using_supabase:
-            try:
-                return await self._supabase.update_enriched_data(
-                    product_id, data
-                )
-            except SupabaseError as exc:
-                logger.warning(
-                    "supabase_update_enriched_failed", error=str(exc)
-                )
-        return local_ok
-
-    async def get_product_for_scoring(self, product_id: str) -> dict | None:
-        """Retorna dados completos de um produto para scoring."""
-        if self._using_supabase:
-            try:
-                return await self._supabase.get_product_for_scoring(product_id)
-            except SupabaseError:
-                pass
-        return await self._sqlite.get_product_for_scoring(product_id)
-
-    async def get_products_needing_retry(
-        self, max_attempts: int = 3, batch_size: int = 5
-    ) -> list[dict]:
-        """Retorna produtos com falha que podem ser retentados."""
-        if self._using_supabase:
-            try:
-                return await self._supabase.get_products_needing_retry(
-                    max_attempts, batch_size
-                )
-            except SupabaseError:
-                pass
-        return await self._sqlite.get_products_needing_retry(
-            max_attempts, batch_size
-        )
-
-    async def reset_stale_claims(self, stale_minutes: int = 30) -> int:
-        """Reseta produtos in_progress por tempo demais (crash recovery)."""
-        count = await self._sqlite.reset_stale_claims(stale_minutes)
-        if self._using_supabase:
-            try:
-                count = await self._supabase.reset_stale_claims(stale_minutes)
-            except SupabaseError as exc:
-                logger.warning(
-                    "supabase_reset_stale_failed", error=str(exc)
-                )
-        return count
 
     # ------------------------------------------------------------------
     # system_logs

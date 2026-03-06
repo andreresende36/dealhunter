@@ -1,17 +1,15 @@
 """
 DealHunter — Entry Point Principal (Scraper Pipeline)
-Coleta ofertas do Mercado Livre e salva no banco para enriquecimento.
+Coleta ofertas do Mercado Livre, pontua e salva no banco.
 
-Fluxo: scraping cards → dedup → fake discount filter → salvar com status pending.
-O worker (src/worker.py) consome a fila e faz deep scrape → score → publicação.
+Fluxo: scraping cards → dedup → fake discount filter → salvar.
 """
 
 import asyncio
-import logging
-import re
 
 import structlog
 
+from src.logging_config import setup_logging
 from src.config import settings
 from src.scraper.ml_scraper import MLScraper
 from src.analyzer.fake_discount_detector import FakeDiscountDetector
@@ -19,47 +17,7 @@ from src.database.storage_manager import StorageManager
 from src.monitoring.alert_bot import AlertBot
 from src.monitoring.health_check import HealthCheck
 
-
-# ---------------------------------------------------------------------------
-# Processador de redação de dados sensíveis nos logs
-# ---------------------------------------------------------------------------
-_SENSITIVE_PATTERNS = [
-    (re.compile(r"(sk-ant-api\w{2}-)[\w-]+"), r"\1****"),  # Anthropic API keys
-    (re.compile(r"(eyJ[\w-]+\.eyJ[\w-]+)\.[\w-]+"), r"\1.****"),  # JWTs (Supabase keys)
-    (re.compile(r"(Bearer\s+)[\w.-]+"), r"\1****"),  # Bearer tokens
-    (re.compile(r"(apikey[=:\s]+)[\w-]+", re.I), r"\1****"),  # API keys genéricos
-    (re.compile(r"(\d{6,}:[\w-]{30,})"), "****:****"),  # Telegram bot tokens
-]
-
-
-def _redact_sensitive_data(logger, method_name, event_dict):
-    """Processador structlog que mascara dados sensíveis nos valores dos logs."""
-    for key, value in event_dict.items():
-        if not isinstance(value, str):
-            continue
-        for pattern, replacement in _SENSITIVE_PATTERNS:
-            value = pattern.sub(replacement, value)
-        event_dict[key] = value
-    return event_dict
-
-
-# Configura logging estruturado
-structlog.configure(
-    processors=[
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.add_log_level,
-        _redact_sensitive_data,
-        (
-            structlog.dev.ConsoleRenderer()
-            if not settings.is_production
-            else structlog.processors.JSONRenderer()
-        ),
-    ],
-    wrapper_class=structlog.make_filtering_bound_logger(
-        logging.getLevelName(settings.log_level)
-    ),
-)
-
+setup_logging()
 logger = structlog.get_logger(__name__)
 
 
@@ -68,7 +26,7 @@ async def run_pipeline() -> dict:
     Executa o pipeline de scraping do DealHunter.
 
     Coleta ofertas dos cards de listagem, filtra duplicatas e descontos falsos,
-    e salva no banco com enrichment_status='pending' para o worker processar.
+    e salva no banco.
 
     Retorna dict com estatísticas da execução.
     """
@@ -111,9 +69,7 @@ async def run_pipeline() -> dict:
             if not await storage.was_recently_sent(product.ml_id, hours=24):
                 new_products.append(product)
 
-        logger.info(
-            "dedup_done", total=len(all_products), new=len(new_products)
-        )
+        logger.info("dedup_done", total=len(all_products), new=len(new_products))
 
         # 3. FAKE DISCOUNT FILTER — Usa dados do card (pré-enrichment)
         fake_results = fake_detector.check_batch(new_products)
@@ -126,9 +82,7 @@ async def run_pipeline() -> dict:
             fake=len(new_products) - len(genuine_products),
         )
 
-        # 4. SALVAR NO BANCO — Com enrichment_status='pending'
-        #    O worker (src/worker.py) consumirá esta fila para:
-        #    deep scrape → score → publicação
+        # 4. SALVAR NO BANCO
         for product in genuine_products:
             try:
                 product_id = await storage.upsert_product(product)

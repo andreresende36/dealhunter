@@ -11,7 +11,7 @@ Flags úteis:
 """
 
 import pytest
-from src.scraper.ofertas_do_dia import OfertasDoDiaScraper
+from src.scraper.ml_scraper import MLScraper, ScrapeSource
 
 
 @pytest.mark.asyncio
@@ -20,7 +20,12 @@ async def test_smoke_scrape_one_page():
     Smoke test: abre 1 página de ofertas do ML e verifica que extraiu algo.
     Valida que os seletores CSS ainda funcionam no site real.
     """
-    scraper = OfertasDoDiaScraper(max_pages=1)
+    source = ScrapeSource(
+        name="ofertas_do_dia",
+        url="https://www.mercadolivre.com.br/ofertas",
+        max_pages=1,
+    )
+    scraper = MLScraper(sources=[source])
     products = await scraper.scrape()
 
     print(f"\n{'='*60}")

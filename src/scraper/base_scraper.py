@@ -105,11 +105,6 @@ class ScrapedProduct:
     category: str = ""
     image_url: str = ""
     free_shipping: bool = False
-    is_official_store: bool = False
-
-    # Dados de enriquecimento (preenchidos pelo deep scrape)
-    seller_reputation: str = ""  # "platinum" | "gold" | "silver" | ""
-    sold_quantity: int = 0
 
     # Controle interno
     scraped_at: float = field(default_factory=time.time)
@@ -134,9 +129,6 @@ class ScrapedProduct:
             "category": self.category,
             "image_url": self.image_url,
             "free_shipping": self.free_shipping,
-            "is_official_store": self.is_official_store,
-            "seller_reputation": self.seller_reputation,
-            "sold_quantity": self.sold_quantity,
             "scraped_at": self.scraped_at,
             "source": self.source,
         }
@@ -331,7 +323,6 @@ class BaseScraper(ABC):
         Retorna True se a página carregou com sucesso.
         """
         self._request_count += 1
-        await self._rotate_context_if_needed()
 
         try:
             response = await page.goto(
