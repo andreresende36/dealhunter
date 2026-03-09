@@ -28,13 +28,8 @@ CREATE TABLE IF NOT EXISTS badges (
     created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Seed: badges conhecidos
-INSERT INTO badges (name) VALUES
-    ('Oferta do dia'),
-    ('Oferta relâmpago'),
-    ('Mais vendido'),
-    ('Oferta imperdível')
-ON CONFLICT (name) DO NOTHING;
+-- Seed de badges é gerenciado por src/database/seeds.py (fonte única de verdade)
+-- Inseridos automaticamente na inicialização do sistema.
 
 -- =============================================================================
 -- 1b. categories
@@ -46,41 +41,8 @@ CREATE TABLE IF NOT EXISTS categories (
     created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Seed: categorias do ML + "Outros"
-INSERT INTO categories (name) VALUES
-    ('Acessórios para Veículos'),
-    ('Agro'),
-    ('Alimentos e Bebidas'),
-    ('Pet Shop'),
-    ('Antiguidades e Coleções'),
-    ('Arte, Papelaria e Armarinho'),
-    ('Bebês'),
-    ('Beleza e Cuidado Pessoal'),
-    ('Brinquedos e Hobbies'),
-    ('Calçados, Roupas e Bolsas'),
-    ('Câmeras e Acessórios'),
-    ('Carros, Motos e Outros'),
-    ('Casa, Móveis e Decoração'),
-    ('Celulares e Telefones'),
-    ('Construção'),
-    ('Eletrodomésticos'),
-    ('Eletrônicos, Áudio e Vídeo'),
-    ('Esportes e Fitness'),
-    ('Ferramentas'),
-    ('Festas e Lembrancinhas'),
-    ('Games'),
-    ('Imóveis'),
-    ('Indústria e Comércio'),
-    ('Informática'),
-    ('Ingressos'),
-    ('Instrumentos Musicais'),
-    ('Joias e Relógios'),
-    ('Livros, Revistas e Comics'),
-    ('Música, Filmes e Seriados'),
-    ('Saúde'),
-    ('Serviços'),
-    ('Outros')
-ON CONFLICT (name) DO NOTHING;
+-- Seed de categorias é gerenciado por src/database/seeds.py (fonte única de verdade)
+-- Inseridos automaticamente na inicialização do sistema.
 
 -- =============================================================================
 -- 2. products

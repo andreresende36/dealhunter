@@ -29,6 +29,7 @@ from src.scraper.base_scraper import ScrapedProduct
 from .supabase_client import SupabaseClient
 from .sqlite_fallback import SQLiteFallback
 from .exceptions import SQLiteError, SupabaseError
+from .seeds import BADGES, CATEGORIES
 
 logger = structlog.get_logger(__name__)
 
@@ -53,6 +54,12 @@ class StorageManager:
         self._supabase = SupabaseClient()
         self._sqlite = SQLiteFallback()
         self._using_supabase = False
+        # Caches persistentes de lookup: {nome_canonico: uuid}
+        self._badge_cache: dict[str, str] = {}
+        self._category_cache: dict[str, str] = {}
+        # Lookup de normalização: {nome_lower: nome_canonico}
+        self._badge_canonical: dict[str, str] = {b.lower(): b for b in BADGES}
+        self._category_canonical: dict[str, str] = {c.lower(): c for c in CATEGORIES}
 
     # ------------------------------------------------------------------
     # Ciclo de vida
@@ -71,6 +78,7 @@ class StorageManager:
 
         if self._force_sqlite:
             logger.info("storage_backend", backend="sqlite", reason="forced")
+            await self._preload_caches()
             return
 
         try:
@@ -79,6 +87,12 @@ class StorageManager:
             if ok:
                 self._using_supabase = True
                 logger.info("storage_backend", backend="supabase")
+                # Seed de lookup tables no Supabase
+                await self._seed_supabase()
+                # Preload caches de lookup
+                await self._preload_caches()
+                # Auto-sync: envia pendentes do SQLite ao Supabase
+                await self._auto_sync()
             else:
                 await self._supabase.close()
                 logger.warning(
@@ -86,6 +100,7 @@ class StorageManager:
                     backend="sqlite",
                     reason="supabase_ping_failed",
                 )
+                await self._preload_caches()
         except Exception as exc:
             logger.warning(
                 "storage_backend",
@@ -93,6 +108,57 @@ class StorageManager:
                 reason="supabase_connect_error",
                 error=str(exc),
             )
+            await self._preload_caches()
+
+    async def _seed_supabase(self) -> None:
+        """Insere badges e categories canônicos no Supabase (idempotente)."""
+        try:
+            for name in BADGES:
+                await self._supabase.get_or_create_badge(name)
+            for name in CATEGORIES:
+                await self._supabase.get_or_create_category(name)
+            logger.debug(
+                "supabase_seeds_applied",
+                badges=len(BADGES),
+                categories=len(CATEGORIES),
+            )
+        except SupabaseError as exc:
+            logger.warning("supabase_seed_failed", error=str(exc))
+
+    async def _preload_caches(self) -> None:
+        """Carrega badges e categories em memória para evitar queries repetidas."""
+        try:
+            if self._using_supabase:
+                self._badge_cache = await self._supabase.get_all_badges()
+                self._category_cache = await self._supabase.get_all_categories()
+            else:
+                self._badge_cache = await self._sqlite.get_all_badges()
+                self._category_cache = await self._sqlite.get_all_categories()
+            logger.debug(
+                "caches_preloaded",
+                badges=len(self._badge_cache),
+                categories=len(self._category_cache),
+            )
+        except Exception as exc:
+            logger.warning("cache_preload_failed", error=str(exc))
+
+    async def _auto_sync(self) -> None:
+        """Sincroniza pendentes do SQLite ao reconectar com Supabase."""
+        try:
+            counts = await self._sqlite.get_unsynced_count()
+            total = sum(v for v in counts.values() if v > 0)
+            if total > 0:
+                logger.info("auto_sync_start", pending=counts)
+                stats = await self._sqlite.sync_to_supabase(self._supabase)
+                total_synced = sum(v["synced"] for v in stats.values())
+                total_errors = sum(v["errors"] for v in stats.values())
+                logger.info(
+                    "auto_sync_done",
+                    synced=total_synced,
+                    errors=total_errors,
+                )
+        except Exception as exc:
+            logger.warning("auto_sync_failed", error=str(exc))
 
     async def _disconnect(self) -> None:
         """Fecha todas as conexões abertas."""
@@ -137,8 +203,7 @@ class StorageManager:
         """
         Insere ou atualiza um produto em ambos os bancos.
 
-        O SQLite é gravado primeiro (buffer seguro).
-        O Supabase é gravado em seguida se disponível.
+        Resolve badge_id e category_id antes de gravar (simétrico com batch).
 
         Returns:
             UUID do produto (gerado pelo SQLite se Supabase indisponível).
@@ -146,12 +211,23 @@ class StorageManager:
         Raises:
             SQLiteError: se o SQLite local falhar (crítico — dado perdido).
         """
+        # Resolve FKs de lookup (usa cache em memória)
+        badge_id = await self.resolve_badge_id(product.badge)
+        category_id = await self.resolve_category_id(product.category)
+
         if self._using_supabase:
             try:
                 # Supabase primeiro: gera o UUID canônico
-                remote_id = await self._supabase.upsert_product(product)
+                remote_id = await self._supabase.upsert_product(
+                    product, badge_id=badge_id, category_id=category_id
+                )
                 # SQLite usa o mesmo UUID para manter FKs consistentes
-                await self._sqlite.upsert_product(product, product_id=remote_id)
+                await self._sqlite.upsert_product(
+                    product,
+                    product_id=remote_id,
+                    badge_id=badge_id,
+                    category_id=category_id,
+                )
                 return remote_id
             except SupabaseError as exc:
                 logger.warning(
@@ -161,7 +237,9 @@ class StorageManager:
                 )
 
         # Supabase indisponível: SQLite gera seu próprio UUID
-        return await self._sqlite.upsert_product(product)
+        return await self._sqlite.upsert_product(
+            product, badge_id=badge_id, category_id=category_id
+        )
 
     async def check_duplicate(self, ml_id: str) -> bool:
         """Verifica se um produto já existe (consulta o backend ativo, fallback no outro)."""
@@ -182,34 +260,76 @@ class StorageManager:
         return await self._sqlite.get_product_id(ml_id)
 
     # ------------------------------------------------------------------
+    # Normalização de nomes (case-insensitive → canônico)
+    # ------------------------------------------------------------------
+
+    def _normalize_badge(self, name: str) -> str:
+        """Normaliza nome de badge para a forma canônica dos seeds.
+
+        Ex: 'MAIS VENDIDO' → 'Mais vendido', 'oferta do dia' → 'Oferta do dia'.
+        Se não encontrar match nos seeds, retorna o nome stripped como está.
+        """
+        return self._badge_canonical.get(name.strip().lower(), name.strip())
+
+    def _normalize_category(self, name: str) -> str:
+        """Normaliza nome de categoria para a forma canônica dos seeds.
+
+        Ex: 'ELETRÔNICOS, ÁUDIO E VÍDEO' → 'Eletrônicos, Áudio e Vídeo'.
+        Se não encontrar match nos seeds, retorna o nome stripped como está.
+        """
+        return self._category_canonical.get(name.strip().lower(), name.strip())
+
+    # ------------------------------------------------------------------
     # badges
     # ------------------------------------------------------------------
 
     async def resolve_badge_id(self, name: str) -> str | None:
-        """Resolve o nome de um badge para seu UUID, criando se necessário."""
+        """Resolve o nome de um badge para seu UUID, usando cache em memória."""
         if not name:
             return None
+        # Normaliza para forma canônica (case-insensitive)
+        name = self._normalize_badge(name)
+        # Cache hit
+        if name in self._badge_cache:
+            return self._badge_cache[name]
+        # Cache miss → consulta + cria se necessário
+        badge_id: str | None = None
         if self._using_supabase:
             try:
-                return await self._supabase.get_or_create_badge(name)
+                badge_id = await self._supabase.get_or_create_badge(name)
             except SupabaseError as exc:
                 logger.warning("supabase_badge_resolve_failed", error=str(exc))
-        return await self._sqlite.get_or_create_badge(name)
+        if badge_id is None:
+            badge_id = await self._sqlite.get_or_create_badge(name)
+        if badge_id:
+            self._badge_cache[name] = badge_id
+        return badge_id
 
     # ------------------------------------------------------------------
     # categories
     # ------------------------------------------------------------------
 
     async def resolve_category_id(self, name: str) -> str | None:
-        """Resolve o nome de uma categoria para seu UUID, criando se necessário."""
+        """Resolve o nome de uma categoria para seu UUID, usando cache em memória."""
         if not name:
             return None
+        # Normaliza para forma canônica (case-insensitive)
+        name = self._normalize_category(name)
+        # Cache hit
+        if name in self._category_cache:
+            return self._category_cache[name]
+        # Cache miss → consulta + cria se necessário
+        cat_id: str | None = None
         if self._using_supabase:
             try:
-                return await self._supabase.get_or_create_category(name)
+                cat_id = await self._supabase.get_or_create_category(name)
             except SupabaseError as exc:
                 logger.warning("supabase_category_resolve_failed", error=str(exc))
-        return await self._sqlite.get_or_create_category(name)
+        if cat_id is None:
+            cat_id = await self._sqlite.get_or_create_category(name)
+        if cat_id:
+            self._category_cache[name] = cat_id
+        return cat_id
 
     # ------------------------------------------------------------------
     # Batch operations (performance)

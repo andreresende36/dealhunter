@@ -115,20 +115,14 @@ class SupabaseClient:
             if result.data:
                 return result.data[0]["id"]
             # Não existe, cria
-            result = (
-                await self._db.table("badges")
-                .insert({"name": name})
-                .execute()
-            )
+            result = await self._db.table("badges").insert({"name": name}).execute()
             if result.data:
                 badge_id: str = result.data[0]["id"]
                 logger.debug("supabase_badge_created", name=name, badge_id=badge_id)
                 return badge_id
             return None
         except Exception as exc:
-            raise SupabaseError(
-                str(exc), operation="get_or_create_badge"
-            ) from exc
+            raise SupabaseError(str(exc), operation="get_or_create_badge") from exc
 
     # ------------------------------------------------------------------
     # categories
@@ -148,26 +142,41 @@ class SupabaseClient:
             )
             if result.data:
                 return result.data[0]["id"]
-            result = (
-                await self._db.table("categories")
-                .insert({"name": name})
-                .execute()
-            )
+            result = await self._db.table("categories").insert({"name": name}).execute()
             if result.data:
                 cat_id: str = result.data[0]["id"]
                 logger.debug("supabase_category_created", name=name, category_id=cat_id)
                 return cat_id
             return None
         except Exception as exc:
-            raise SupabaseError(
-                str(exc), operation="get_or_create_category"
-            ) from exc
+            raise SupabaseError(str(exc), operation="get_or_create_category") from exc
+
+    async def get_all_badges(self) -> dict[str, str]:
+        """Retorna todos os badges como {nome: uuid}."""
+        try:
+            result = await self._db.table("badges").select("id, name").execute()
+            return {row["name"]: row["id"] for row in (result.data or [])}
+        except Exception as exc:
+            raise SupabaseError(str(exc), operation="get_all_badges") from exc
+
+    async def get_all_categories(self) -> dict[str, str]:
+        """Retorna todas as categorias como {nome: uuid}."""
+        try:
+            result = await self._db.table("categories").select("id, name").execute()
+            return {row["name"]: row["id"] for row in (result.data or [])}
+        except Exception as exc:
+            raise SupabaseError(str(exc), operation="get_all_categories") from exc
 
     # ------------------------------------------------------------------
     # products
     # ------------------------------------------------------------------
 
-    async def upsert_product(self, product: ScrapedProduct) -> Optional[str]:
+    async def upsert_product(
+        self,
+        product: ScrapedProduct,
+        badge_id: str | None = None,
+        category_id: str | None = None,
+    ) -> Optional[str]:
         """
         Insere ou atualiza um produto pelo ml_id.
 
@@ -177,7 +186,7 @@ class SupabaseClient:
 
         Retorna o UUID (id) do produto no banco, ou None em caso de erro.
         """
-        data = self._product_to_row(product)
+        data = self._product_to_row(product, badge_id=badge_id, category_id=category_id)
         try:
             result = (
                 await self._db.table("products")
@@ -238,9 +247,7 @@ class SupabaseClient:
             )
             return {row["ml_id"] for row in result.data}
         except Exception as exc:
-            raise SupabaseError(
-                str(exc), operation="check_duplicates_batch"
-            ) from exc
+            raise SupabaseError(str(exc), operation="check_duplicates_batch") from exc
 
     async def upsert_products_batch(
         self,
@@ -285,9 +292,7 @@ class SupabaseClient:
         except SupabaseError:
             raise
         except Exception as exc:
-            raise SupabaseError(
-                str(exc), operation="upsert_products_batch"
-            ) from exc
+            raise SupabaseError(str(exc), operation="upsert_products_batch") from exc
 
     async def add_price_history_batch(self, entries: list[dict]) -> bool:
         """
@@ -311,9 +316,7 @@ class SupabaseClient:
             logger.debug("price_history_batch_added", count=len(rows))
             return True
         except Exception as exc:
-            raise SupabaseError(
-                str(exc), operation="add_price_history_batch"
-            ) from exc
+            raise SupabaseError(str(exc), operation="add_price_history_batch") from exc
 
     async def get_product_id(self, ml_id: str) -> Optional[str]:
         """Retorna o UUID interno de um produto pelo ml_id."""
@@ -361,13 +364,9 @@ class SupabaseClient:
             logger.debug("price_history_added", product_id=product_id, price=price)
             return True
         except Exception as exc:
-            raise SupabaseError(
-                str(exc), operation="add_price_history"
-            ) from exc
+            raise SupabaseError(str(exc), operation="add_price_history") from exc
 
-    async def get_price_history(
-        self, product_id: str, days: int = 30
-    ) -> list[dict]:
+    async def get_price_history(self, product_id: str, days: int = 30) -> list[dict]:
         """
         Retorna o histórico de preços dos últimos N dias para um produto.
 
@@ -389,9 +388,7 @@ class SupabaseClient:
             )
             return result.data or []
         except Exception as exc:
-            raise SupabaseError(
-                str(exc), operation="get_price_history"
-            ) from exc
+            raise SupabaseError(str(exc), operation="get_price_history") from exc
 
     # ------------------------------------------------------------------
     # scored_offers
@@ -442,9 +439,7 @@ class SupabaseClient:
             )
             return scored_offer_id
         except Exception as exc:
-            raise SupabaseError(
-                str(exc), operation="save_scored_offer"
-            ) from exc
+            raise SupabaseError(str(exc), operation="save_scored_offer") from exc
 
     async def get_pending_scored_offers(self, limit: int = 50) -> list[dict]:
         """
@@ -481,9 +476,7 @@ class SupabaseClient:
             )
             return len(result.data) > 0
         except Exception as exc:
-            raise SupabaseError(
-                str(exc), operation="has_recent_sends"
-            ) from exc
+            raise SupabaseError(str(exc), operation="has_recent_sends") from exc
 
     async def mark_as_sent(
         self,
@@ -518,9 +511,7 @@ class SupabaseClient:
             )
             return True
         except Exception as exc:
-            raise SupabaseError(
-                str(exc), operation="mark_as_sent"
-            ) from exc
+            raise SupabaseError(str(exc), operation="mark_as_sent") from exc
 
     async def was_recently_sent(self, ml_id: str, hours: int = 24) -> bool:
         """
@@ -548,7 +539,9 @@ class SupabaseClient:
                 str(exc), operation="was_recently_sent", ml_id=ml_id
             ) from exc
 
-    async def update_click_count(self, scored_offer_id: str, channel: str, clicks: int) -> bool:
+    async def update_click_count(
+        self, scored_offer_id: str, channel: str, clicks: int
+    ) -> bool:
         """Atualiza o contador de cliques de um envio (chamado pelo Shlink webhook)."""
         try:
             await (
@@ -560,9 +553,7 @@ class SupabaseClient:
             )
             return True
         except Exception as exc:
-            raise SupabaseError(
-                str(exc), operation="update_click_count"
-            ) from exc
+            raise SupabaseError(str(exc), operation="update_click_count") from exc
 
     # ------------------------------------------------------------------
     # system_logs
@@ -596,9 +587,7 @@ class SupabaseClient:
             return True
         except Exception as exc:
             # Falha de log é menos crítica, mas ainda reportamos via exceção
-            raise SupabaseError(
-                str(exc), operation="log_event"
-            ) from exc
+            raise SupabaseError(str(exc), operation="log_event") from exc
 
     async def get_recent_logs(
         self, event_type: Optional[str] = None, limit: int = 100
@@ -616,9 +605,7 @@ class SupabaseClient:
             result = await query.execute()
             return result.data or []
         except Exception as exc:
-            raise SupabaseError(
-                str(exc), operation="get_recent_logs"
-            ) from exc
+            raise SupabaseError(str(exc), operation="get_recent_logs") from exc
 
     # ------------------------------------------------------------------
     # Helpers internos
@@ -643,20 +630,20 @@ class SupabaseClient:
         """
         now = datetime.now(tz=timezone.utc).isoformat()
         row = {
-            "ml_id":            product.ml_id,
-            "title":            product.title,
-            "current_price":    product.price,
-            "original_price":   product.original_price,
+            "ml_id": product.ml_id,
+            "title": product.title,
+            "current_price": product.price,
+            "original_price": product.original_price,
             "discount_percent": int(product.discount_pct),
-            "rating_stars":     product.rating,
-            "rating_count":     product.review_count,
-            "free_shipping":    product.free_shipping,
-            "thumbnail_url":    product.image_url,
-            "product_url":      product.url,
-            "category_id":      category_id,
-            "badge_id":         badge_id,
+            "rating_stars": product.rating,
+            "rating_count": product.review_count,
+            "free_shipping": product.free_shipping,
+            "thumbnail_url": product.image_url,
+            "product_url": product.url,
+            "category_id": category_id,
+            "badge_id": badge_id,
             # Supabase retorna first_seen_at inalterado no update via trigger
-            "first_seen_at":    now,
-            "last_seen_at":     now,
+            "first_seen_at": now,
+            "last_seen_at": now,
         }
         return row

@@ -23,13 +23,15 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
-# Tabelas a truncar (respeitando FKs)
+# Tabelas a truncar (ordem respeita FKs — dependentes primeiro)
 TABLES_TO_TRUNCATE = [
-    "sent_offers",      # sem FKs dependentes
+    "sent_offers",      # FK: scored_offer_id
     "scored_offers",    # FK: product_id
     "price_history",    # FK: product_id
-    "products",         # PK principal
+    "products",         # FK: badge_id, category_id
     "system_logs",      # sem FKs
+    "badges",           # lookup (products já foi limpa)
+    "categories",       # lookup (products já foi limpa)
 ]
 
 

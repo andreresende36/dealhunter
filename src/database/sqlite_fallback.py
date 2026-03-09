@@ -30,6 +30,7 @@ import structlog
 from src.config import settings
 from src.scraper.base_scraper import ScrapedProduct
 from .exceptions import SQLiteError
+from .seeds import BADGES, CATEGORIES
 
 if TYPE_CHECKING:
     from .supabase_client import SupabaseClient
@@ -225,6 +226,31 @@ class SQLiteFallback:
             except Exception:
                 pass  # Coluna já existe
 
+        # Seed de dados canônicos (idempotente)
+        await self._seed_lookup_tables()
+
+    async def _seed_lookup_tables(self) -> None:
+        """Insere badges e categories canônicos definidos em seeds.py."""
+        try:
+            for name in BADGES:
+                await self._db.execute(
+                    "INSERT OR IGNORE INTO badges (id, name) VALUES (?, ?)",
+                    (str(uuid.uuid4()), name),
+                )
+            for name in CATEGORIES:
+                await self._db.execute(
+                    "INSERT OR IGNORE INTO categories (id, name) VALUES (?, ?)",
+                    (str(uuid.uuid4()), name),
+                )
+            await self._db.commit()
+            logger.debug(
+                "sqlite_seeds_applied",
+                badges=len(BADGES),
+                categories=len(CATEGORIES),
+            )
+        except Exception as exc:
+            logger.warning("sqlite_seed_failed", error=str(exc))
+
     # ------------------------------------------------------------------
     # Health check
     # ------------------------------------------------------------------
@@ -241,6 +267,15 @@ class SQLiteFallback:
     # ------------------------------------------------------------------
     # badges
     # ------------------------------------------------------------------
+
+    async def get_all_badges(self) -> dict[str, str]:
+        """Retorna todos os badges como {nome: uuid}."""
+        try:
+            cursor = await self._db.execute("SELECT id, name FROM badges")
+            rows = await cursor.fetchall()
+            return {row["name"]: row["id"] for row in rows}
+        except Exception as exc:
+            raise SQLiteError(str(exc), operation="get_all_badges") from exc
 
     async def get_or_create_badge(self, name: str) -> Optional[str]:
         """Retorna o ID do badge pelo nome. Cria se não existir."""
@@ -267,6 +302,15 @@ class SQLiteFallback:
     # ------------------------------------------------------------------
     # categories
     # ------------------------------------------------------------------
+
+    async def get_all_categories(self) -> dict[str, str]:
+        """Retorna todas as categorias como {nome: uuid}."""
+        try:
+            cursor = await self._db.execute("SELECT id, name FROM categories")
+            rows = await cursor.fetchall()
+            return {row["name"]: row["id"] for row in rows}
+        except Exception as exc:
+            raise SQLiteError(str(exc), operation="get_all_categories") from exc
 
     async def get_or_create_category(self, name: str) -> Optional[str]:
         """Retorna o ID da categoria pelo nome. Cria se não existir."""
@@ -295,7 +339,11 @@ class SQLiteFallback:
     # ------------------------------------------------------------------
 
     async def upsert_product(
-        self, product: ScrapedProduct, product_id: Optional[str] = None
+        self,
+        product: ScrapedProduct,
+        product_id: Optional[str] = None,
+        badge_id: Optional[str] = None,
+        category_id: Optional[str] = None,
     ) -> Optional[str]:
         """
         Insere ou atualiza um produto pelo ml_id.
@@ -308,6 +356,8 @@ class SQLiteFallback:
             product: Dados do produto scrapeado.
             product_id: UUID a usar na inserção. Se None, gera um novo.
                         Ignorado se o produto já existir no SQLite.
+            badge_id: UUID do badge (resolvido externamente).
+            category_id: UUID da categoria (resolvido externamente).
 
         Returns:
             UUID (str) do produto, ou None em caso de erro.
@@ -330,7 +380,7 @@ class SQLiteFallback:
                         discount_percent=?,
                         rating_stars=?, rating_count=?,
                         free_shipping=?, thumbnail_url=?,
-                        product_url=?,
+                        product_url=?, category_id=?, badge_id=?,
                         first_seen_at=?, last_seen_at=?, synced=0
                     WHERE ml_id=?
                     """,
@@ -344,6 +394,8 @@ class SQLiteFallback:
                         int(product.free_shipping),
                         product.image_url,
                         product.url,
+                        category_id,
+                        badge_id,
                         first_seen,
                         now,
                         product.ml_id,
@@ -358,8 +410,9 @@ class SQLiteFallback:
                         discount_percent,
                         rating_stars, rating_count,
                         free_shipping, thumbnail_url, product_url,
+                        category_id, badge_id,
                         first_seen_at, last_seen_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     (
                         product_id,
@@ -373,6 +426,8 @@ class SQLiteFallback:
                         int(product.free_shipping),
                         product.image_url,
                         product.url,
+                        category_id,
+                        badge_id,
                         now,
                         now,
                     ),
@@ -574,9 +629,10 @@ class SQLiteFallback:
                     id, ml_id, title, current_price, original_price,
                     discount_percent,
                     rating_stars, rating_count,
-                    free_shipping, thumbnail_url, product_url, category,
+                    free_shipping, thumbnail_url, product_url,
+                    category_id, badge_id,
                     first_seen_at, last_seen_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     str(data.get("id", "")),
@@ -590,7 +646,8 @@ class SQLiteFallback:
                     int(bool(data.get("free_shipping", False))),
                     str(data.get("thumbnail_url", "")),
                     str(data.get("product_url", "")),
-                    str(data.get("category", "")),
+                    data.get("category_id"),
+                    data.get("badge_id"),
                     str(data.get("first_seen_at", "")),
                     str(data.get("last_seen_at", "")),
                 ),
@@ -875,8 +932,15 @@ class SQLiteFallback:
         table: str,
         conflict_col: str,
         limit: int = 500,
+        chunk_size: int = 50,
     ) -> dict:
-        """Sincroniza uma tabela genérica (sem transformação de colunas)."""
+        """
+        Sincroniza uma tabela genérica em batch (chunks).
+
+        Para a tabela 'products', re-resolve badge_id e category_id
+        usando os nomes das tabelas de lookup (os UUIDs do SQLite são
+        diferentes dos UUIDs do Supabase).
+        """
         ok_ids: list[str] = []
         fail_ids: list[str] = []
         try:
@@ -885,35 +949,140 @@ class SQLiteFallback:
                 (limit,),
             )
             rows = await cursor.fetchall()
+            if not rows:
+                return {"synced": 0, "errors": 0}
+
+            # Prepara os dados removendo a coluna 'synced'
+            all_data: list[tuple[str, dict]] = []
             for row in rows:
                 row_id = str(row["id"])
                 data = {k: row[k] for k in row.keys() if k != "synced"}
+                all_data.append((row_id, data))
+
+            # Para products: re-resolver FKs de badge/category pelo nome
+            if table == "products":
+                await self._resolve_product_fks_for_sync(client, all_data)
+
+            # Envio em chunks (batch upsert)
+            for i in range(0, len(all_data), chunk_size):
+                chunk = all_data[i : i + chunk_size]
+                chunk_rows = [data for _, data in chunk]
+                chunk_ids = [row_id for row_id, _ in chunk]
                 try:
                     res = (
                         await client._db.table(table)
-                        .upsert(data, on_conflict=conflict_col)
+                        .upsert(chunk_rows, on_conflict=conflict_col)
                         .execute()
                     )
                     if res.data:
-                        ok_ids.append(row_id)
+                        ok_ids.extend(chunk_ids)
                     else:
-                        fail_ids.append(row_id)
-                except Exception:
-                    fail_ids.append(row_id)
+                        fail_ids.extend(chunk_ids)
+                except Exception as exc:
+                    logger.warning(
+                        f"sync_{table}_chunk_error",
+                        error=str(exc),
+                        chunk_start=i,
+                    )
+                    fail_ids.extend(chunk_ids)
 
-            for row_id in ok_ids:
+            # Marca como sincronizados em batch
+            if ok_ids:
+                placeholders = ",".join("?" * len(ok_ids))
                 await self._db.execute(
-                    f"UPDATE {table} SET synced=1 WHERE id=?",  # noqa: S608
-                    (row_id,),
+                    f"UPDATE {table} SET synced=1 WHERE id IN ({placeholders})",  # noqa: S608
+                    ok_ids,
                 )
-            await self._db.commit()
+                await self._db.commit()
+
         except Exception as exc:
             logger.error(f"sync_{table}_error", error=str(exc))
             fail_ids.append("outer_error")
         return {"synced": len(ok_ids), "errors": len(fail_ids)}
 
-    async def _sync_logs_table(self, client: SupabaseClient) -> dict:
-        """Sincroniza system_logs: deserializa details (TEXT→dict) antes."""
+    async def _resolve_product_fks_for_sync(
+        self,
+        client: SupabaseClient,
+        data_list: list[tuple[str, dict]],
+    ) -> None:
+        """
+        Re-resolve badge_id e category_id pelo nome antes de enviar ao Supabase.
+
+        Os UUIDs de lookup no SQLite são diferentes dos do Supabase.
+        Busca os nomes via JOIN local e resolve para os UUIDs do Supabase.
+        """
+        # Coleta badge_ids e category_ids locais usados
+        local_badge_ids = {
+            d["badge_id"]
+            for _, d in data_list
+            if d.get("badge_id")
+        }
+        local_cat_ids = {
+            d["category_id"]
+            for _, d in data_list
+            if d.get("category_id")
+        }
+
+        # Mapeia UUID local → nome (via SQLite)
+        badge_local_to_name: dict[str, str] = {}
+        if local_badge_ids:
+            placeholders = ",".join("?" * len(local_badge_ids))
+            cursor = await self._db.execute(
+                f"SELECT id, name FROM badges WHERE id IN ({placeholders})",  # noqa: S608
+                list(local_badge_ids),
+            )
+            for row in await cursor.fetchall():
+                badge_local_to_name[row["id"]] = row["name"]
+
+        cat_local_to_name: dict[str, str] = {}
+        if local_cat_ids:
+            placeholders = ",".join("?" * len(local_cat_ids))
+            cursor = await self._db.execute(
+                f"SELECT id, name FROM categories WHERE id IN ({placeholders})",  # noqa: S608
+                list(local_cat_ids),
+            )
+            for row in await cursor.fetchall():
+                cat_local_to_name[row["id"]] = row["name"]
+
+        # Resolve nomes → UUIDs do Supabase (com cache)
+        badge_name_to_remote: dict[str, str] = {}
+        for name in set(badge_local_to_name.values()):
+            try:
+                remote_id = await client.get_or_create_badge(name)
+                if remote_id:
+                    badge_name_to_remote[name] = remote_id
+            except Exception:
+                pass
+
+        cat_name_to_remote: dict[str, str] = {}
+        for name in set(cat_local_to_name.values()):
+            try:
+                remote_id = await client.get_or_create_category(name)
+                if remote_id:
+                    cat_name_to_remote[name] = remote_id
+            except Exception:
+                pass
+
+        # Substitui UUIDs locais pelos UUIDs do Supabase nos dados
+        for _, data in data_list:
+            local_bid = data.get("badge_id")
+            if local_bid and local_bid in badge_local_to_name:
+                name = badge_local_to_name[local_bid]
+                data["badge_id"] = badge_name_to_remote.get(name)
+            elif local_bid:
+                data["badge_id"] = None  # UUID local sem nome correspondente
+
+            local_cid = data.get("category_id")
+            if local_cid and local_cid in cat_local_to_name:
+                name = cat_local_to_name[local_cid]
+                data["category_id"] = cat_name_to_remote.get(name)
+            elif local_cid:
+                data["category_id"] = None
+
+    async def _sync_logs_table(
+        self, client: SupabaseClient, chunk_size: int = 50
+    ) -> dict:
+        """Sincroniza system_logs em batch: deserializa details (TEXT→dict) antes."""
         ok_ids: list[str] = []
         fail_ids: list[str] = []
         try:
@@ -921,25 +1090,41 @@ class SQLiteFallback:
                 "SELECT * FROM system_logs WHERE synced=0 LIMIT 500"
             )
             rows = await cursor.fetchall()
+            if not rows:
+                return {"synced": 0, "errors": 0}
+
+            all_data: list[tuple[str, dict]] = []
             for row in rows:
                 row_id = str(row["id"])
                 data = {k: row[k] for k in row.keys() if k != "synced"}
                 data["details"] = json.loads(data.get("details") or "{}")
-                try:
-                    res = await client._db.table("system_logs").insert(data).execute()
-                    if res.data:
-                        ok_ids.append(row_id)
-                    else:
-                        fail_ids.append(row_id)
-                except Exception:
-                    fail_ids.append(row_id)
+                all_data.append((row_id, data))
 
-            for row_id in ok_ids:
+            for i in range(0, len(all_data), chunk_size):
+                chunk = all_data[i : i + chunk_size]
+                chunk_rows = [data for _, data in chunk]
+                chunk_ids = [row_id for row_id, _ in chunk]
+                try:
+                    res = (
+                        await client._db.table("system_logs")
+                        .upsert(chunk_rows, on_conflict="id")
+                        .execute()
+                    )
+                    if res.data:
+                        ok_ids.extend(chunk_ids)
+                    else:
+                        fail_ids.extend(chunk_ids)
+                except Exception:
+                    fail_ids.extend(chunk_ids)
+
+            if ok_ids:
+                placeholders = ",".join("?" * len(ok_ids))
                 await self._db.execute(
-                    "UPDATE system_logs SET synced=1 WHERE id=?",
-                    (row_id,),
+                    f"UPDATE system_logs SET synced=1 WHERE id IN ({placeholders})",  # noqa: S608
+                    ok_ids,
                 )
-            await self._db.commit()
+                await self._db.commit()
+
         except Exception as exc:
             logger.error("sync_system_logs_error", error=str(exc))
             fail_ids.append("outer_error")

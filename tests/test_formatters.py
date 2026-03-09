@@ -32,9 +32,7 @@ def sample_product() -> ScrapedProduct:
         review_count=1500,
         category="Calçados",
         free_shipping=True,
-        is_official_store=True,
         image_url="https://http2.mlstatic.com/image.jpg",
-        source="ofertas_do_dia",
     )
 
 

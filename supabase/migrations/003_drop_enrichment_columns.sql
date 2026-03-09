@@ -1,11 +1,10 @@
 -- =============================================================================
--- DealHunter — Migration 002: Remove enrichment pipeline columns
+-- DealHunter — Migration: drop_enrichment_columns
+-- Versão: 20260306022612
 --
--- Removes columns that were used by the deep scrape worker (discontinued):
+-- Remove colunas do deep scrape worker (descontinuado):
 --   - seller_reputation, sold_quantity (enrichment data)
 --   - enrichment_status, enrichment_attempts, enrichment_error, enriched_at
---
--- Also drops related indexes.
 -- =============================================================================
 
 -- Drop enrichment indexes first
