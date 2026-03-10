@@ -126,6 +126,7 @@ class SQLiteFallback:
             rating_stars      REAL DEFAULT 0,
             rating_count      INTEGER DEFAULT 0,
             free_shipping     INTEGER DEFAULT 0,
+            installments_without_interest INTEGER DEFAULT 0,
             thumbnail_url     TEXT DEFAULT '',
             product_url       TEXT DEFAULT '',
             category_id       TEXT REFERENCES categories(id),
@@ -215,13 +216,12 @@ class SQLiteFallback:
 
         # Migrações incrementais para bancos já existentes
         for col, ref in [
-            ("badge_id", "badges(id)"),
-            ("category_id", "categories(id)"),
+            ("badge_id", "TEXT REFERENCES badges(id)"),
+            ("category_id", "TEXT REFERENCES categories(id)"),
+            ("installments_without_interest", "INTEGER DEFAULT 0"),
         ]:
             try:
-                await self._db.execute(
-                    f"ALTER TABLE products ADD COLUMN {col} TEXT REFERENCES {ref}"
-                )
+                await self._db.execute(f"ALTER TABLE products ADD COLUMN {col} {ref}")
                 await self._db.commit()
             except Exception:
                 pass  # Coluna já existe
@@ -373,6 +373,37 @@ class SQLiteFallback:
         except Exception as exc:
             raise SQLiteError(str(exc), operation="get_or_create_badge") from exc
 
+    async def ensure_badge_id(self, name: str, badge_id: str) -> None:
+        """Garante que o badge exista no SQLite com o UUID especificado (do Supabase).
+
+        Usa INSERT OR IGNORE para não sobrescrever se já existir com outro ID.
+        Se existir com ID diferente, atualiza para usar o ID remoto (sync).
+        """
+        try:
+            cursor = await self._db.execute(
+                "SELECT id FROM badges WHERE name = ?", (name,)
+            )
+            row = await cursor.fetchone()
+            if not row:
+                await self._db.execute(
+                    "INSERT OR IGNORE INTO badges (id, name) VALUES (?, ?)",
+                    (badge_id, name),
+                )
+                await self._db.commit()
+            elif row["id"] != badge_id:
+                local_id = row["id"]
+                await self._db.execute(
+                    "UPDATE products SET badge_id = ? WHERE badge_id = ?",
+                    (badge_id, local_id),
+                )
+                await self._db.execute(
+                    "UPDATE badges SET id = ? WHERE name = ?",
+                    (badge_id, name),
+                )
+                await self._db.commit()
+        except Exception as exc:
+            logger.warning("sqlite_ensure_badge_id_failed", name=name, error=str(exc))
+
     # ------------------------------------------------------------------
     # categories
     # ------------------------------------------------------------------
@@ -407,6 +438,38 @@ class SQLiteFallback:
             return cat_id
         except Exception as exc:
             raise SQLiteError(str(exc), operation="get_or_create_category") from exc
+
+    async def ensure_category_id(self, name: str, category_id: str) -> None:
+        """Garante que a categoria exista no SQLite com o UUID especificado (do Supabase).
+
+        Mesma lógica do ensure_badge_id: sincroniza o UUID local com o remoto.
+        """
+        try:
+            cursor = await self._db.execute(
+                "SELECT id FROM categories WHERE name = ?", (name,)
+            )
+            row = await cursor.fetchone()
+            if not row:
+                await self._db.execute(
+                    "INSERT OR IGNORE INTO categories (id, name) VALUES (?, ?)",
+                    (category_id, name),
+                )
+                await self._db.commit()
+            elif row["id"] != category_id:
+                local_id = row["id"]
+                await self._db.execute(
+                    "UPDATE products SET category_id = ? WHERE category_id = ?",
+                    (category_id, local_id),
+                )
+                await self._db.execute(
+                    "UPDATE categories SET id = ? WHERE name = ?",
+                    (category_id, name),
+                )
+                await self._db.commit()
+        except Exception as exc:
+            logger.warning(
+                "sqlite_ensure_category_id_failed", name=name, error=str(exc)
+            )
 
     # ------------------------------------------------------------------
     # products
@@ -453,7 +516,7 @@ class SQLiteFallback:
                         title=?, current_price=?, original_price=?,
                         discount_percent=?,
                         rating_stars=?, rating_count=?,
-                        free_shipping=?, thumbnail_url=?,
+                        free_shipping=?, installments_without_interest=?, thumbnail_url=?,
                         product_url=?, category_id=?, badge_id=?,
                         first_seen_at=?, last_seen_at=?, synced=0
                     WHERE ml_id=?
@@ -466,6 +529,7 @@ class SQLiteFallback:
                         product.rating,
                         product.review_count,
                         int(product.free_shipping),
+                        int(product.installments_without_interest),
                         product.image_url,
                         product.url,
                         category_id,
@@ -483,10 +547,10 @@ class SQLiteFallback:
                         id, ml_id, title, current_price, original_price,
                         discount_percent,
                         rating_stars, rating_count,
-                        free_shipping, thumbnail_url, product_url,
+                        free_shipping, installments_without_interest, thumbnail_url, product_url,
                         category_id, badge_id,
                         first_seen_at, last_seen_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     (
                         product_id,
@@ -498,6 +562,7 @@ class SQLiteFallback:
                         product.rating,
                         product.review_count,
                         int(product.free_shipping),
+                        int(product.installments_without_interest),
                         product.image_url,
                         product.url,
                         category_id,
@@ -588,7 +653,7 @@ class SQLiteFallback:
                             title=?, current_price=?, original_price=?,
                             discount_percent=?,
                             rating_stars=?, rating_count=?,
-                            free_shipping=?, thumbnail_url=?,
+                            free_shipping=?, installments_without_interest=?, thumbnail_url=?,
                             product_url=?, category_id=?, badge_id=?,
                             first_seen_at=?, last_seen_at=?, synced=0
                         WHERE ml_id=?
@@ -601,6 +666,7 @@ class SQLiteFallback:
                             p.rating,
                             p.review_count,
                             int(p.free_shipping),
+                            int(p.installments_without_interest),
                             p.image_url,
                             p.url,
                             c_id,
@@ -619,11 +685,11 @@ class SQLiteFallback:
                             id, ml_id, title, current_price,
                             original_price, discount_percent,
                             rating_stars, rating_count,
-                            free_shipping, thumbnail_url,
+                            free_shipping, installments_without_interest, thumbnail_url,
                             product_url, category_id,
                             badge_id, first_seen_at, last_seen_at
                         ) VALUES (
-                            ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                            ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                         )
                         """,
                         (
@@ -636,6 +702,7 @@ class SQLiteFallback:
                             p.rating,
                             p.review_count,
                             int(p.free_shipping),
+                            int(p.installments_without_interest),
                             p.image_url,
                             p.url,
                             c_id,
@@ -703,10 +770,10 @@ class SQLiteFallback:
                     id, ml_id, title, current_price, original_price,
                     discount_percent,
                     rating_stars, rating_count,
-                    free_shipping, thumbnail_url, product_url,
+                    free_shipping, installments_without_interest, thumbnail_url, product_url,
                     category_id, badge_id,
                     first_seen_at, last_seen_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     str(data.get("id", "")),
@@ -718,6 +785,7 @@ class SQLiteFallback:
                     float(data.get("rating_stars", 0)),
                     int(data.get("rating_count", 0)),
                     int(bool(data.get("free_shipping", False))),
+                    int(bool(data.get("installments_without_interest", False))),
                     str(data.get("thumbnail_url", "")),
                     str(data.get("product_url", "")),
                     data.get("category_id"),
@@ -1086,16 +1154,8 @@ class SQLiteFallback:
         Busca os nomes via JOIN local e resolve para os UUIDs do Supabase.
         """
         # Coleta badge_ids e category_ids locais usados
-        local_badge_ids = {
-            d["badge_id"]
-            for _, d in data_list
-            if d.get("badge_id")
-        }
-        local_cat_ids = {
-            d["category_id"]
-            for _, d in data_list
-            if d.get("category_id")
-        }
+        local_badge_ids = {d["badge_id"] for _, d in data_list if d.get("badge_id")}
+        local_cat_ids = {d["category_id"] for _, d in data_list if d.get("category_id")}
 
         # Mapeia UUID local → nome (via SQLite)
         badge_local_to_name: dict[str, str] = {}
