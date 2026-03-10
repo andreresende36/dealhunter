@@ -625,6 +625,8 @@ class SupabaseClient:
           discount_pct  → discount_percent  (float → int)
           rating        → rating_stars
           review_count  → rating_count
+          free_shipping → free_shipping
+          installments_without_interest → installments_without_interest
           image_url     → thumbnail_url
           category      → category_id  (resolvido externamente)
         """
@@ -638,6 +640,7 @@ class SupabaseClient:
             "rating_stars": product.rating,
             "rating_count": product.review_count,
             "free_shipping": product.free_shipping,
+            "installments_without_interest": product.installments_without_interest,
             "thumbnail_url": product.image_url,
             "product_url": product.url,
             "category_id": category_id,

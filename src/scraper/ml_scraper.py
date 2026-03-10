@@ -23,6 +23,7 @@ import asyncio
 from bs4 import BeautifulSoup, Tag
 from playwright.async_api import Page
 
+from src.config import settings
 from .base_scraper import BaseScraper, CaptchaError, RateLimitError, ScrapedProduct
 from .ml_classifier import get_product_category, classify_with_ai
 
@@ -107,6 +108,8 @@ SELECTORS = {
     # Avaliação e reviews (poly- + ui-search- fallbacks)
     "rating": (".poly-reviews__rating, " "span.ui-search-reviews__rating-number"),
     "review_count": (".poly-reviews__total, " "span.ui-search-reviews__amount"),
+    # Parcelamento
+    "installments": ".poly-price__installments",
     # Badges
     "badge": "span.poly-component__highlight",
     # Paginação (link-based)
@@ -149,7 +152,7 @@ class MLScraper(BaseScraper):
             ScrapeSource(
                 name="ofertas_do_dia",
                 url=OFERTAS_URL,
-                max_pages=10,
+                max_pages=settings.scraper.max_pages,
             )
         ]
 
@@ -522,6 +525,15 @@ class MLScraper(BaseScraper):
                 text = shipping_tag.get_text(strip=True).lower()
                 free_shipping = "grátis" in text or "gratis" in text
 
+            # --- Parcelamento sem juros ---
+            installments_tag = item.select_one(SELECTORS["installments"])
+            installments_without_interest = False
+            if installments_tag:
+                text = installments_tag.get_text(strip=True).lower()
+                installments_without_interest = (
+                    "sem juros" in text or "sin interés" in text
+                )
+
             # --- Imagem ---
             img_tag = item.select_one(SELECTORS["image"])
             image_url = ""
@@ -544,6 +556,7 @@ class MLScraper(BaseScraper):
                 category=get_product_category(title),
                 image_url=image_url,
                 free_shipping=free_shipping,
+                installments_without_interest=installments_without_interest,
                 badge=badge,
                 source=source.name,
             )

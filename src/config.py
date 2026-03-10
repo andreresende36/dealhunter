@@ -45,6 +45,10 @@ class TelegramConfig:
             if g.strip()
         ]
     )
+    # Chat ID do admin para alertas (usa o primeiro grupo como fallback)
+    admin_chat_id: str = field(
+        default_factory=lambda: os.getenv("TELEGRAM_ADMIN_CHAT_ID", "")
+    )
     # Delay entre mensagens para evitar flood (segundos)
     send_delay: float = float(os.getenv("TELEGRAM_SEND_DELAY", "1.5"))
 
@@ -98,8 +102,8 @@ class ClaudeConfig:
 
 @dataclass
 class ShlinkConfig:
-    api_url: str = field(default_factory=lambda: os.environ["SHLINK_API_URL"])
-    api_key: str = field(default_factory=lambda: os.environ["SHLINK_API_KEY"])
+    api_url: str = field(default_factory=lambda: os.getenv("SHLINK_API_URL", ""))
+    api_key: str = field(default_factory=lambda: os.getenv("SHLINK_API_KEY", ""))
     domain: str = field(default_factory=lambda: os.getenv("SHLINK_DOMAIN", ""))
 
 
@@ -125,14 +129,16 @@ class MercadoLivreConfig:
 @dataclass
 class ScraperConfig:
     # Delays em segundos (min, max)
-    delay_min: float = float(os.getenv("SCRAPER_DELAY_MIN", "1.0"))
-    delay_max: float = float(os.getenv("SCRAPER_DELAY_MAX", "3.0"))
+    delay_min: float = float(os.getenv("SCRAPER_DELAY_MIN", "2.0"))
+    delay_max: float = float(os.getenv("SCRAPER_DELAY_MAX", "5.0"))
     # Timeout de página em ms
     page_timeout: int = int(os.getenv("SCRAPER_PAGE_TIMEOUT", "30000"))
     # Headless mode para Playwright
     headless: bool = os.getenv("SCRAPER_HEADLESS", "true").lower() == "true"
     # Número máximo de retentativas por página
     max_retries: int = int(os.getenv("SCRAPER_MAX_RETRIES", "3"))
+    # Número máximo de páginas por fonte
+    max_pages: int = int(os.getenv("SCRAPER_MAX_PAGES", "10"))
     # Proxy (opcional): "http://user:pass@host:port"
     proxy_url: Optional[str] = field(
         default_factory=lambda: os.getenv("SCRAPER_PROXY_URL")
@@ -155,11 +161,22 @@ class ScoreConfig:
     # Número mínimo de avaliações
     min_reviews: int = int(os.getenv("SCORE_MIN_REVIEWS", "10"))
     # Pesos por critério (soma = 100)
-    weight_discount: float = float(os.getenv("SCORE_WEIGHT_DISCOUNT", "40.0"))
-    weight_rating: float = float(os.getenv("SCORE_WEIGHT_RATING", "25.0"))
-    weight_reviews: float = float(os.getenv("SCORE_WEIGHT_REVIEWS", "15.0"))
+    weight_discount: float = float(os.getenv("SCORE_WEIGHT_DISCOUNT", "35.0"))
+    weight_rating: float = float(os.getenv("SCORE_WEIGHT_RATING", "20.0"))
+    weight_reviews: float = float(os.getenv("SCORE_WEIGHT_REVIEWS", "10.0"))
     weight_free_shipping: float = float(os.getenv("SCORE_WEIGHT_FREE_SHIPPING", "10.0"))
-    weight_title_quality: float = float(os.getenv("SCORE_WEIGHT_TITLE_QUALITY", "10.0"))
+    weight_title_quality: float = float(os.getenv("SCORE_WEIGHT_TITLE_QUALITY", "5.0"))
+    weight_badge: float = float(os.getenv("SCORE_WEIGHT_BADGE", "20.0"))
+
+
+# ---------------------------------------------------------------------------
+# OpenRouter (classificação por LLM)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class OpenRouterConfig:
+    api_key: str = field(default_factory=lambda: os.getenv("OPENROUTER_API_KEY", ""))
 
 
 # ---------------------------------------------------------------------------
@@ -202,6 +219,7 @@ class Settings:
     mercado_livre: MercadoLivreConfig = field(default_factory=MercadoLivreConfig)
     scraper: ScraperConfig = field(default_factory=ScraperConfig)
     score: ScoreConfig = field(default_factory=ScoreConfig)
+    openrouter: OpenRouterConfig = field(default_factory=OpenRouterConfig)
     n8n: N8nConfig = field(default_factory=N8nConfig)
     sqlite: SQLiteConfig = field(default_factory=SQLiteConfig)
 

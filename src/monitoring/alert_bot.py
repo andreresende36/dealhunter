@@ -4,7 +4,6 @@ Envia alertas críticos via Telegram para o admin.
 Usado quando há falhas, erros inesperados ou limites atingidos.
 """
 
-import os
 from datetime import datetime
 from typing import Optional
 
@@ -38,9 +37,10 @@ class AlertBot:
 
     def __init__(self, admin_chat_id: Optional[str] = None):
         self.cfg = settings.telegram
-        self.admin_chat_id = admin_chat_id or os.getenv(
-            "TELEGRAM_ADMIN_CHAT_ID",
-            self.cfg.group_ids[0] if self.cfg.group_ids else "",
+        self.admin_chat_id = (
+            admin_chat_id
+            or self.cfg.admin_chat_id
+            or (self.cfg.group_ids[0] if self.cfg.group_ids else "")
         )
         self.base_url = f"https://api.telegram.org/bot{self.cfg.bot_token}"
 

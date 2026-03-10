@@ -1,10 +1,11 @@
 import json
-import os
 import re
 from pathlib import Path
 
 import httpx
 import structlog
+
+from src.config import settings
 
 logger = structlog.get_logger(__name__)
 
@@ -505,7 +506,7 @@ async def classify_with_ai(title: str) -> str:
     Classifies a product using OpenRouter LLM.
     Returns the category name if matched, or 'Outros' on failure.
     """
-    api_key = os.environ.get("OPENROUTER_API_KEY")
+    api_key = settings.openrouter.api_key
     if not api_key:
         logger.warning("openrouter_key_missing", title=title)
         return "Outros"

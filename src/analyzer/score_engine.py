@@ -3,12 +3,20 @@ DealHunter — Score Engine
 Sistema de pontuação por regras para filtrar e priorizar ofertas.
 Pontuação de 0 a 100. Ofertas abaixo do mínimo são descartadas.
 
-Critérios e pesos (soma = 100):
-  - Desconto (%)              → até 40 pts  (SCORE_WEIGHT_DISCOUNT)
-  - Avaliação (estrelas)      → até 25 pts  (SCORE_WEIGHT_RATING)
-  - Nº de reviews             → até 15 pts  (SCORE_WEIGHT_REVIEWS)
+Critérios e pesos base (soma = 100):
+  - Desconto (%)              → até 35 pts  (SCORE_WEIGHT_DISCOUNT)
+  - Badge                     → até 20 pts  (SCORE_WEIGHT_BADGE)
+  - Avaliação (estrelas)      → até 20 pts  (SCORE_WEIGHT_RATING)
+  - Nº de reviews             → até 10 pts  (SCORE_WEIGHT_REVIEWS)
   - Frete grátis              → 10 pts      (SCORE_WEIGHT_FREE_SHIPPING)
-  - Qualidade do título       → até 10 pts  (SCORE_WEIGHT_TITLE_QUALITY)
+  - Qualidade do título       → até 5 pts   (SCORE_WEIGHT_TITLE_QUALITY)
+
+Escala de badge (proporção do peso SCORE_WEIGHT_BADGE):
+  - "Oferta relâmpago"        → 100% do peso (20 pts default)
+  - "Oferta imperdível"       → 50%          (10 pts default)
+  - "Oferta do dia"           → 30%          (6 pts default)
+  - "Mais vendido"            → 10%          (2 pts default)
+  - Sem badge                 → 0%
 """
 
 import re
@@ -32,6 +40,7 @@ class ScoreBreakdown:
     free_shipping: float = 0.0
     reviews: float = 0.0
     title_quality: float = 0.0
+    badge: float = 0.0
 
     @property
     def total(self) -> float:
@@ -41,6 +50,7 @@ class ScoreBreakdown:
             + self.free_shipping
             + self.reviews
             + self.title_quality
+            + self.badge
         )
 
 
@@ -65,6 +75,7 @@ class ScoredProduct:
                     "free_shipping": self.breakdown.free_shipping,
                     "reviews": self.breakdown.reviews,
                     "title_quality": self.breakdown.title_quality,
+                    "badge": self.breakdown.badge,
                 },
                 "passed": self.passed,
                 "reject_reason": self.reject_reason,
@@ -91,21 +102,24 @@ class ScoreEngine:
         """Calcula o score de um produto e decide se passa no filtro."""
         breakdown = ScoreBreakdown()
 
-        # 1. Pontuação por desconto (40 pts máx)
+        # 1. Pontuação por desconto (35 pts máx)
         breakdown.discount = self._score_discount(product.discount_pct)
 
-        # 2. Pontuação por avaliação (25 pts máx)
+        # 2. Pontuação por badge (20 pts máx)
+        breakdown.badge = self._score_badge(product.badge)
+
+        # 3. Pontuação por avaliação (20 pts máx)
         breakdown.rating = self._score_rating(product.rating)
 
-        # 3. Pontuação por número de reviews (15 pts máx)
+        # 4. Pontuação por número de reviews (10 pts máx)
         breakdown.reviews = self._score_reviews(product.review_count)
 
-        # 4. Bônus frete grátis (10 pts)
+        # 5. Frete grátis (10 pts)
         breakdown.free_shipping = (
             self.cfg.weight_free_shipping if product.free_shipping else 0.0
         )
 
-        # 5. Qualidade do título (10 pts máx)
+        # 6. Qualidade do título (5 pts máx)
         breakdown.title_quality = self._score_title(product.title)
 
         score = round(breakdown.total, 1)
@@ -205,6 +219,19 @@ class ScoreEngine:
                 break
 
         return round(min(score, max_pts), 1)
+
+    # Proporção do peso máximo de badge por tipo
+    _BADGE_RATIO: dict[str, float] = {
+        "Mais vendido": 0.10,       # 10% do peso
+        "Oferta do dia": 0.30,      # 30% do peso
+        "Oferta imperdível": 0.50,  # 50% do peso
+        "Oferta relâmpago": 1.00,   # 100% do peso
+    }
+
+    def _score_badge(self, badge: str) -> float:
+        """Pontuação por badge do ML proporcional ao peso configurável."""
+        ratio = self._BADGE_RATIO.get(badge, 0.0)
+        return round(ratio * self.cfg.weight_badge, 1)
 
     # ------------------------------------------------------------------
     # Hard filters — eliminação imediata

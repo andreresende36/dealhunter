@@ -61,6 +61,10 @@ class ShlinkClient:
             "findIfExists": True,  # Reutiliza se URL já foi encurtada
         }
 
+        # Usa domínio personalizado se configurado (ex: s.sempreblack.com)
+        if self.cfg.domain:
+            payload["domain"] = self.cfg.domain
+
         async with httpx.AsyncClient(timeout=10.0) as client:
             try:
                 response = await client.post(

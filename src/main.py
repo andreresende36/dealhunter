@@ -2,7 +2,7 @@
 DealHunter — Entry Point Principal (Scraper Pipeline)
 Coleta ofertas do Mercado Livre, pontua e salva no banco.
 
-Fluxo: scraping cards → dedup → fake discount filter → salvar.
+Fluxo: scraping cards → dedup → fake discount filter → score → salvar.
 """
 
 import asyncio
@@ -14,6 +14,7 @@ from src.logging_config import setup_logging
 from src.config import settings
 from src.scraper.ml_scraper import MLScraper
 from src.analyzer.fake_discount_detector import FakeDiscountDetector
+from src.analyzer.score_engine import ScoreEngine
 from src.database.storage_manager import StorageManager
 from src.monitoring.alert_bot import AlertBot
 from src.monitoring.health_check import HealthCheck
@@ -34,6 +35,9 @@ async def run_pipeline() -> dict:
     stats = {
         "scraped": 0,
         "new": 0,
+        "scored": 0,
+        "approved": 0,
+        "rejected": 0,
         "saved": 0,
         "errors": 0,
     }
@@ -87,29 +91,70 @@ async def run_pipeline() -> dict:
             fake=len(new_products) - len(genuine_products),
         )
 
-        # 4. SALVAR NO BANCO (batch: 3 queries ao invés de N×3)
-        if genuine_products:
+        # 4. SCORE — Avalia e filtra por pontuação mínima
+        score_engine = ScoreEngine()
+        scored_products = score_engine.evaluate_batch(genuine_products)
+        stats["scored"] = len(genuine_products)
+        stats["approved"] = len(scored_products)
+        stats["rejected"] = len(genuine_products) - len(scored_products)
+
+        logger.info(
+            "score_done",
+            total=len(genuine_products),
+            approved=len(scored_products),
+            rejected=stats["rejected"],
+        )
+
+        # 5. SALVAR NO BANCO — Só produtos aprovados pelo score
+        approved_products = [s.product for s in scored_products]
+
+        if approved_products:
             try:
-                ids = await storage.upsert_products_batch(genuine_products)
+                ids = await storage.upsert_products_batch(approved_products)
                 entries = [
                     {
                         "product_id": ids[p.ml_id],
                         "price": p.price,
                         "original_price": p.original_price,
                     }
-                    for p in genuine_products
+                    for p in approved_products
                     if p.ml_id in ids
                 ]
                 await storage.add_price_history_batch(entries)
                 stats["saved"] = len(ids)
+
+                # Salva scored_offers para tracking
+                for s in scored_products:
+                    if s.product.ml_id in ids:
+                        try:
+                            await storage.save_scored_offer(
+                                product_id=ids[s.product.ml_id],
+                                rule_score=int(s.score),
+                                final_score=int(s.score),
+                                status="pending",
+                            )
+                        except Exception as exc_so:
+                            logger.warning(
+                                "scored_offer_save_failed",
+                                ml_id=s.product.ml_id,
+                                error=str(exc_so),
+                            )
+
             except Exception as exc:
                 logger.error("batch_save_failed", error=str(exc))
                 # Fallback: salva individualmente
-                for product in genuine_products:
+                for s in scored_products:
+                    product = s.product
                     try:
                         product_id = await storage.upsert_product(product)
                         await storage.add_price_history(
                             product_id, product.price, product.original_price
+                        )
+                        await storage.save_scored_offer(
+                            product_id=product_id,
+                            rule_score=int(s.score),
+                            final_score=int(s.score),
+                            status="pending",
                         )
                         stats["saved"] += 1
                     except Exception as exc2:

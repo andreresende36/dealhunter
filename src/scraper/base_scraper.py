@@ -104,6 +104,7 @@ class ScrapedProduct:
     category: str = ""
     image_url: str = ""
     free_shipping: bool = False
+    installments_without_interest: bool = False
     badge: str = ""  # Ex: "Oferta do dia", "Mais vendido"
 
     # Controle interno
@@ -128,6 +129,7 @@ class ScrapedProduct:
             "category": self.category,
             "image_url": self.image_url,
             "free_shipping": self.free_shipping,
+            "installments_without_interest": self.installments_without_interest,
             "badge": self.badge,
             "scraped_at": self.scraped_at,
             "source": self.source,
@@ -313,7 +315,7 @@ class BaseScraper(ABC):
     # ------------------------------------------------------------------
 
     @retry(
-        stop=stop_after_attempt(3),
+        stop=stop_after_attempt(settings.scraper.max_retries),
         wait=wait_exponential(multiplier=2, min=4, max=30),
         reraise=True,
     )

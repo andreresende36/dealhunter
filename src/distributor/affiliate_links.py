@@ -25,19 +25,19 @@ class AffiliateLinkBuilder:
         affiliate_url = builder.build("https://www.mercadolivre.com.br/p/MLB123")
     """
 
-    # Parâmetros de rastreamento do programa de afiliados ML
-    # Referência: documentação do ML Partners
-    ML_AFFILIATE_PARAMS = {
-        "matt_tool": "sem_googleads",  # Fonte (pode ser customizada)
-        "matt_word": "sempreblack",
-        "matt_source": "google",
-        "matt_campaign": "sempreblack",
-        "matt_ad_type": "pla",
-        "matt_creative_id": "sem",
-    }
-
     def __init__(self):
         self.cfg = settings.mercado_livre
+        tag = self.cfg.affiliate_tag
+        # Parâmetros de rastreamento do programa de afiliados ML
+        # Referência: documentação do ML Partners
+        self.affiliate_params = {
+            "matt_tool": "sem_googleads",  # Fonte (pode ser customizada)
+            "matt_word": tag,
+            "matt_source": "google",
+            "matt_campaign": tag,
+            "matt_ad_type": "pla",
+            "matt_creative_id": "sem",
+        }
 
     def build(self, product_url: str) -> str:
         """
@@ -61,7 +61,7 @@ class AffiliateLinkBuilder:
             # Parâmetros de afiliado têm prioridade
             affiliate_params = {
                 **{k: [v[0]] for k, v in existing_params.items()},
-                **{k: [v] for k, v in self.ML_AFFILIATE_PARAMS.items()},
+                **{k: [v] for k, v in self.affiliate_params.items()},
             }
 
             # Adiciona ID de afiliado se configurado

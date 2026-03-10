@@ -284,9 +284,10 @@ class StorageManager:
         """Normaliza nome de badge para a forma canônica dos seeds.
 
         Ex: 'MAIS VENDIDO' → 'Mais vendido', 'oferta do dia' → 'Oferta do dia'.
-        Se não encontrar match nos seeds, retorna o nome stripped como está.
+        Se não encontrar match nos seeds, retorna "" (badge ignorado).
+        Isso evita que labels de loja ("LOJA OFICIAL APPLE") virem badges inválidos.
         """
-        return self._badge_canonical.get(name.strip().lower(), name.strip())
+        return self._badge_canonical.get(name.strip().lower(), "")
 
     def _normalize_category(self, name: str) -> str:
         """Normaliza nome de categoria para a forma canônica dos seeds.
@@ -318,6 +319,10 @@ class StorageManager:
                 logger.warning("supabase_badge_resolve_failed", error=str(exc))
         if badge_id is None:
             badge_id = await self._sqlite.get_or_create_badge(name)
+        else:
+            # Supabase retornou UUID — garante que SQLite tenha o mesmo UUID
+            # para evitar FOREIGN KEY constraint failure nos inserts de produtos
+            await self._sqlite.ensure_badge_id(name, badge_id)
         if badge_id:
             self._badge_cache[name] = badge_id
         return badge_id
@@ -344,6 +349,10 @@ class StorageManager:
                 logger.warning("supabase_category_resolve_failed", error=str(exc))
         if cat_id is None:
             cat_id = await self._sqlite.get_or_create_category(name)
+        else:
+            # Supabase retornou UUID — garante que SQLite tenha o mesmo UUID
+            # para evitar FOREIGN KEY constraint failure nos inserts de produtos
+            await self._sqlite.ensure_category_id(name, cat_id)
         if cat_id:
             self._category_cache[name] = cat_id
         return cat_id
