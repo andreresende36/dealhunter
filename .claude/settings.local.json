@@ -13,7 +13,8 @@
       "Bash(.venv/bin/pytest tests/test_score_engine.py tests/test_integration.py tests/test_scrapers.py -v --tb=short)",
       "Bash(git add .env.example src/analyzer/score_engine.py src/config.py src/database/schema.sql src/database/sqlite_fallback.py src/database/storage_manager.py src/database/supabase_client.py src/distributor/message_formatter.py src/main.py src/scraper/__init__.py src/scraper/base_scraper.py src/scraper/ml_scraper.py src/scraper/product_detail_scraper.py src/worker.py src/logging_config.py supabase/migrations/002_drop_enrichment_columns.sql tests/test_integration.py tests/test_score_engine.py tests/test_scrapers.py tests/test_scrapers_live.py)",
       "Bash(python -m pytest tests/test_scrapers.py tests/test_integration.py tests/test_score_engine.py -x -q)",
-      "Bash(git add supabase/migrations/007_add_installments_without_interest_to_products.sql src/database/sqlite_fallback.py)"
+      "Bash(git add supabase/migrations/007_add_installments_without_interest_to_products.sql src/database/sqlite_fallback.py)",
+      "Bash(python -m pytest tests/test_score_engine.py -v)"
     ]
   },
   "enableAllProjectMcpServers": true,
