@@ -161,12 +161,13 @@ class ScoreConfig:
     # Número mínimo de avaliações
     min_reviews: int = int(os.getenv("SCORE_MIN_REVIEWS", "10"))
     # Pesos por critério (soma = 100)
-    weight_discount: float = float(os.getenv("SCORE_WEIGHT_DISCOUNT", "35.0"))
-    weight_rating: float = float(os.getenv("SCORE_WEIGHT_RATING", "20.0"))
+    weight_discount: float = float(os.getenv("SCORE_WEIGHT_DISCOUNT", "30.0"))
+    weight_badge: float = float(os.getenv("SCORE_WEIGHT_BADGE", "15.0"))
+    weight_rating: float = float(os.getenv("SCORE_WEIGHT_RATING", "15.0"))
     weight_reviews: float = float(os.getenv("SCORE_WEIGHT_REVIEWS", "10.0"))
     weight_free_shipping: float = float(os.getenv("SCORE_WEIGHT_FREE_SHIPPING", "10.0"))
-    weight_title_quality: float = float(os.getenv("SCORE_WEIGHT_TITLE_QUALITY", "5.0"))
-    weight_badge: float = float(os.getenv("SCORE_WEIGHT_BADGE", "20.0"))
+    weight_installments: float = float(os.getenv("SCORE_WEIGHT_INSTALLMENTS", "10.0"))
+    weight_title_quality: float = float(os.getenv("SCORE_WEIGHT_TITLE_QUALITY", "10.0"))
 
 
 # ---------------------------------------------------------------------------

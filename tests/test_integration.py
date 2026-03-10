@@ -90,10 +90,12 @@ def mock_settings():
         mock.score.min_score = 60
         mock.score.min_rating = 4.0
         mock.score.min_reviews = 10
-        mock.score.weight_discount = 40.0
-        mock.score.weight_rating = 25.0
-        mock.score.weight_reviews = 15.0
+        mock.score.weight_discount = 30.0
+        mock.score.weight_badge = 15.0
+        mock.score.weight_rating = 15.0
+        mock.score.weight_reviews = 10.0
         mock.score.weight_free_shipping = 10.0
+        mock.score.weight_installments = 10.0
         mock.score.weight_title_quality = 10.0
         yield mock
 
