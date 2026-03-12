@@ -349,11 +349,76 @@ class BaseScraper(ABC):
                 await asyncio.sleep(random.uniform(10, 20))
                 raise Exception("CAPTCHA detectado — retrying")
 
+            # Aceita banner de cookies se presente
+            await self._accept_cookies(page)
+
             return True
 
         except Exception as exc:
             logger.error("goto_error", url=url, error=str(exc))
             raise
+
+    async def _accept_cookies(self, page: Page) -> bool:
+        """
+        Tenta aceitar o banner de cookies se estiver presente na página.
+
+        Testa primeiro seletores CSS específicos do ML e padrões comuns
+        (OneTrust, etc.), depois faz varredura por texto em botões visíveis.
+        Retorna True se algum botão foi clicado, False se nenhum banner foi
+        encontrado. Nunca lança exceção — erros são silenciados.
+        """
+        # Seletores CSS diretos (ML + plataformas comuns de consentimento)
+        _CSS_SELECTORS = [
+            # Mercado Livre — botão "Concordo" / "Entendido"
+            "button[data-testid='action:understood-button']",
+            "#cookie-disclaimer-actions button",
+            # OneTrust (amplamente utilizado)
+            "#onetrust-accept-btn-handler",
+            ".onetrust-accept-btn-handler",
+            # Padrões genéricos por id/class
+            "button[id*='accept'][id*='cookie']",
+            "button[class*='accept'][class*='cookie']",
+            "button[id*='cookie'][id*='accept']",
+        ]
+
+        # Textos de botão a procurar (case-insensitive, substring)
+        _TEXT_PATTERNS = [
+            "aceitar todos",
+            "aceitar tudo",
+            "aceitar cookies",
+            "concordo",
+            "entendi",
+            "aceitar",
+            "accept all",
+            "accept cookies",
+            "i agree",
+        ]
+
+        # 1. Tenta seletores CSS
+        for selector in _CSS_SELECTORS:
+            try:
+                btn = await page.query_selector(selector)
+                if btn and await btn.is_visible():
+                    await btn.click()
+                    await asyncio.sleep(0.5)
+                    logger.debug("cookies_accepted", method="css", selector=selector)
+                    return True
+            except Exception:
+                pass
+
+        # 2. Tenta por texto — percorre botões visíveis
+        for text in _TEXT_PATTERNS:
+            try:
+                btn = page.get_by_role("button", name=re.compile(text, re.IGNORECASE))
+                if await btn.count() > 0 and await btn.first.is_visible():
+                    await btn.first.click()
+                    await asyncio.sleep(0.5)
+                    logger.debug("cookies_accepted", method="text", pattern=text)
+                    return True
+            except Exception:
+                pass
+
+        return False
 
     async def _is_blocked(self, page: Page) -> bool:
         """Detecta se o site retornou uma página de bloqueio/CAPTCHA."""
