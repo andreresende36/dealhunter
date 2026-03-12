@@ -19,7 +19,8 @@
       "Bash(git add scripts/reset_databases.py src/database/schema.sql src/database/seeds.py src/database/sqlite_fallback.py src/database/storage_manager.py src/database/supabase_client.py src/scraper/base_scraper.py supabase/migrations/010_add_marketplaces_table.sql)",
       "Bash(git commit:*)",
       "mcp__supabase__get_advisors",
-      "Bash(python3 -c \"from PIL import Image; print\\(''Pillow available''\\)\")"
+      "Bash(python3 -c \"from PIL import Image; print\\(''Pillow available''\\)\")",
+      "Bash(python3 -:*)"
     ]
   },
   "enableAllProjectMcpServers": true,
