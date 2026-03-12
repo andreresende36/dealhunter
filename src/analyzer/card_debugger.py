@@ -10,7 +10,6 @@ Uso (chamado automaticamente em main.py quando SCRAPER_DEBUG_SCREENSHOTS=true):
 from __future__ import annotations
 
 import base64
-import io
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -63,9 +62,9 @@ h1 { font-size: 22px; margin-bottom: 6px; }
     background: #fafafa;
     border-bottom: 1px solid #eee;
     text-align: center;
-    padding: 4px;
+    padding: 8px;
 }
-.card-img img { max-width: 100%; display: block; }
+.card-img img { max-width: 100%; max-height: 280px; display: inline-block; }
 .card-img .no-img { color: #aaa; font-size: 12px; padding: 40px 0; }
 .card-body { padding: 14px; }
 .card-title {
@@ -217,58 +216,6 @@ Score mínimo configurado: <strong>{min_score}</strong></p>
 # ---------------------------------------------------------------------------
 
 
-def _crop_info_section(img_bytes: bytes) -> bytes:
-    """
-    Remove a área branca superior (placeholder da foto) do screenshot do card.
-    Mantém apenas a seção de informações: badge, título, preço, avaliação, frete.
-
-    Estratégia: varre as linhas de cima para baixo analisando a faixa central
-    da imagem (evita bordas/sombras arredondadas). A primeira linha com > 6% de
-    pixels abaixo do brilho 210 é considerada o início do conteúdo.
-
-    Só corta se o espaço em branco superar 15 % da altura total do card.
-    Retorna os bytes originais se Pillow não estiver disponível ou ocorrer erro.
-    """
-    try:
-        from PIL import Image  # type: ignore[import-untyped]
-    except ImportError:
-        return img_bytes
-
-    try:
-        img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
-        width, height = img.size
-
-        # Faixa central: 20 %–80 % da largura (ignora sombra/borda arredondada)
-        x_start = width // 5
-        x_end = 4 * width // 5
-        step = max(1, (x_end - x_start) // 50)   # ≈ 50 amostras por linha
-        sample_n = len(range(x_start, x_end, step))
-
-        crop_top = 0
-        # Começa da linha 10 para pular a borda/sombra superior do card
-        for y in range(10, height - 20):
-            dark = sum(
-                1
-                for x in range(x_start, x_end, step)
-                # "escuro" = qualquer canal RGB abaixo de 210
-                if min(img.getpixel((x, y))[:3]) < 210
-            )
-            if dark / sample_n > 0.06:          # > 6 % → linha com conteúdo
-                crop_top = max(0, y - 12)        # margem de 12 px acima
-                break
-
-        # Só corta se houver espaço em branco relevante (> 15 % da altura)
-        if crop_top > height * 0.15:
-            img = img.crop((0, crop_top, width, height))
-
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        return buf.getvalue()
-
-    except Exception:
-        return img_bytes  # Fallback: retorna original intacto
-
-
 def _build_cards(
     ordered: list["ScoredProduct"],
     screenshots: dict[str, bytes],
@@ -279,10 +226,9 @@ def _build_cards(
         p = s.product
         b = s.breakdown
 
-        # --- Screenshot (recortado para remover placeholder de foto) ---
+        # --- Screenshot ---
         if p.ml_id in screenshots:
-            cropped = _crop_info_section(screenshots[p.ml_id])
-            b64 = base64.b64encode(cropped).decode()
+            b64 = base64.b64encode(screenshots[p.ml_id]).decode()
             img_html = f'<img src="data:image/png;base64,{b64}" alt="card {p.ml_id}">'
         else:
             img_html = '<div class="no-img">screenshot não disponível</div>'
