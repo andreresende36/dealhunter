@@ -170,9 +170,9 @@ class ScoreEngine:
     # Proporcao do peso maximo de badge por tipo (chaves normalizadas)
     _BADGE_RATIO: dict[str, float] = {
         "oferta relampago": 1.00,  # 100% do peso
-        "oferta imperdivel": 0.50,  # 50% do peso
-        "oferta do dia": 0.30,  # 30% do peso
-        "mais vendido": 0.10,  # 10% do peso
+        "oferta do dia":    0.50,  # 50% do peso
+        "mais vendido":     0.30,  # 30% do peso
+        "oferta imperdivel": 0.10, # 10% do peso
     }
 
     def __init__(self) -> None:

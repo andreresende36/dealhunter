@@ -674,3 +674,4 @@ class MLScraper(BaseScraper):
             return int(text)
         except (ValueError, TypeError):
             return 0
+
