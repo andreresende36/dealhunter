@@ -581,10 +581,29 @@ class StorageManager:
         """
         Salva o resultado da análise em ambos os bancos.
 
+        Supabase primeiro (gera UUID canônico), depois SQLite com o mesmo UUID
+        para manter FKs consistentes entre os bancos.
+
         Returns:
             UUID do scored_offer.
         """
-        local_id = None
+        canonical_id: str | None = None
+
+        # Supabase primeiro: gera o UUID canônico
+        if self._using_supabase:
+            try:
+                canonical_id = await self._supabase.save_scored_offer(
+                    product_id,
+                    rule_score,
+                    final_score,
+                    status,
+                    ai_score,
+                    ai_description,
+                )
+            except SupabaseError as exc:
+                logger.warning("supabase_scored_offer_failed", error=str(exc))
+
+        # SQLite usa o mesmo UUID do Supabase (ou gera próprio se indisponível)
         try:
             local_id = await self._sqlite.save_scored_offer(
                 product_id,
@@ -593,6 +612,7 @@ class StorageManager:
                 status,
                 ai_score,
                 ai_description,
+                offer_id=canonical_id,
             )
         except SQLiteError as exc:
             if "FOREIGN KEY" in str(exc):
@@ -603,26 +623,16 @@ class StorageManager:
                 )
             else:
                 raise
+            local_id = None
 
-        if self._using_supabase:
-            try:
-                remote_id = await self._supabase.save_scored_offer(
-                    product_id,
-                    rule_score,
-                    final_score,
-                    status,
-                    ai_score,
-                    ai_description,
-                )
-                return remote_id
-            except SupabaseError as exc:
-                logger.warning("supabase_scored_offer_failed", error=str(exc))
-
-        return local_id or ""
+        return canonical_id or local_id or ""
 
     async def save_scored_offers_batch(self, entries: list[dict]) -> list[str]:
         """
         Salva múltiplas scored_offers em ambos os bancos (1 transação cada).
+
+        Supabase primeiro (gera UUIDs canônicos), depois SQLite com os mesmos
+        UUIDs para manter FKs consistentes entre os bancos.
 
         entries: lista de dicts com keys:
             product_id, rule_score, final_score, status,
@@ -634,9 +644,22 @@ class StorageManager:
         if not entries:
             return []
 
+        remote_ids: list[str] = []
+
+        # Supabase primeiro: gera UUIDs canônicos
+        if self._using_supabase:
+            try:
+                remote_ids = await self._supabase.save_scored_offers_batch(entries)
+            except SupabaseError as exc:
+                logger.warning("supabase_scored_offers_batch_failed", error=str(exc))
+
+        # SQLite usa os mesmos UUIDs do Supabase (ou gera próprios se indisponível)
         local_ids: list[str] = []
         try:
-            local_ids = await self._sqlite.save_scored_offers_batch(entries)
+            local_ids = await self._sqlite.save_scored_offers_batch(
+                entries,
+                offer_ids=remote_ids or None,
+            )
         except SQLiteError as exc:
             if "FOREIGN KEY" in str(exc):
                 logger.warning(
@@ -647,14 +670,7 @@ class StorageManager:
             else:
                 raise
 
-        if self._using_supabase:
-            try:
-                remote_ids = await self._supabase.save_scored_offers_batch(entries)
-                return remote_ids
-            except SupabaseError as exc:
-                logger.warning("supabase_scored_offers_batch_failed", error=str(exc))
-
-        return local_ids
+        return remote_ids or local_ids
 
     # ------------------------------------------------------------------
     # sent_offers
@@ -673,17 +689,16 @@ class StorageManager:
         self,
         scored_offer_id: str,
         channel: str,
-        shlink_short_url: str = "",
     ) -> bool:
         """Registra o envio em ambos os bancos."""
         local_ok = False
         try:
             local_ok = await self._sqlite.mark_as_sent(
-                scored_offer_id, channel, shlink_short_url
+                scored_offer_id, channel
             )
         except SQLiteError as exc:
             if "FOREIGN KEY" in str(exc):
-                logger.warning(
+                logger.debug(
                     "sqlite_fk_skip",
                     scored_offer_id=scored_offer_id,
                     table="sent_offers",
@@ -693,7 +708,7 @@ class StorageManager:
         if self._using_supabase:
             try:
                 return await self._supabase.mark_as_sent(
-                    scored_offer_id, channel, shlink_short_url
+                    scored_offer_id, channel
                 )
             except SupabaseError as exc:
                 logger.warning("supabase_mark_sent_failed", error=str(exc))
@@ -817,6 +832,52 @@ class StorageManager:
                     "supabase_save_affiliate_links_batch_failed", error=str(exc)
                 )
         return local_ids
+
+    # ------------------------------------------------------------------
+    # Image Worker
+    # ------------------------------------------------------------------
+
+    async def get_pending_images(self, batch_size: int = 5) -> list[dict]:
+        """Retorna produtos pendentes de processamento de imagem."""
+        if self._using_supabase:
+            try:
+                return await self._supabase.get_pending_images(batch_size)
+            except SupabaseError:
+                pass
+        return await self._sqlite.get_pending_images(batch_size)
+
+    async def update_image_status(
+        self,
+        product_id: str,
+        status: str,
+        enhanced_url: str | None = None,
+    ) -> bool:
+        """Atualiza o status de processamento de imagem em ambos os bancos."""
+        local_ok = False
+        try:
+            local_ok = await self._sqlite.update_image_status(
+                product_id, status, enhanced_url
+            )
+        except SQLiteError as exc:
+            logger.warning("sqlite_update_image_status_failed", error=str(exc))
+
+        if self._using_supabase:
+            try:
+                return await self._supabase.update_image_status(
+                    product_id, status, enhanced_url
+                )
+            except SupabaseError as exc:
+                logger.warning("supabase_update_image_status_failed", error=str(exc))
+        return local_ok
+
+    async def get_enhanced_image_url(self, product_id: str) -> str | None:
+        """Retorna a URL da imagem aprimorada, se existir."""
+        if self._using_supabase:
+            try:
+                return await self._supabase.get_enhanced_image_url(product_id)
+            except SupabaseError:
+                pass
+        return await self._sqlite.get_enhanced_image_url(product_id)
 
     # ------------------------------------------------------------------
     # system_logs

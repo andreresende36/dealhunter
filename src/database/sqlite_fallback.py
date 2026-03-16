@@ -172,7 +172,6 @@ class SQLiteFallback:
             scored_offer_id TEXT NOT NULL
                                 REFERENCES scored_offers(id) ON DELETE CASCADE,
             channel          TEXT NOT NULL,
-            shlink_short_url TEXT DEFAULT '',
             sent_at          TEXT DEFAULT (datetime('now')),
             clicks           INTEGER DEFAULT 0,
             synced           INTEGER DEFAULT 0
@@ -348,6 +347,25 @@ class SQLiteFallback:
         try:
             await self._db.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_u_email ON users(email) WHERE email IS NOT NULL"
+            )
+            await self._db.commit()
+        except Exception:
+            pass
+
+        # Migrações incrementais — image worker
+        for col, definition in [
+            ("enhanced_image_url", "TEXT"),
+            ("image_status", "TEXT DEFAULT 'pending'"),
+        ]:
+            try:
+                await self._db.execute(f"ALTER TABLE products ADD COLUMN {col} {definition}")
+                await self._db.commit()
+            except Exception:
+                pass  # Coluna já existe
+
+        try:
+            await self._db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_p_image_status ON products(image_status)"
             )
             await self._db.commit()
         except Exception:
@@ -1138,14 +1156,19 @@ class SQLiteFallback:
         status: str,
         ai_score: Optional[int] = None,
         ai_description: Optional[str] = None,
+        offer_id: Optional[str] = None,
     ) -> Optional[str]:
         """
         Salva o resultado da análise de uma oferta.
 
+        Args:
+            offer_id: UUID pré-definido (ex: vindo do Supabase) para manter
+                      FKs consistentes entre os bancos.
+
         Returns:
             UUID do scored_offer criado, ou None em caso de erro.
         """
-        row_id = str(uuid.uuid4())
+        row_id = offer_id or str(uuid.uuid4())
         now = datetime.now(tz=timezone.utc).isoformat()
         try:
             await self._db.execute(
@@ -1177,13 +1200,19 @@ class SQLiteFallback:
         except Exception as exc:
             raise SQLiteError(str(exc), operation="save_scored_offer") from exc
 
-    async def save_scored_offers_batch(self, entries: list[dict]) -> list[str]:
+    async def save_scored_offers_batch(
+        self,
+        entries: list[dict],
+        offer_ids: list[str] | None = None,
+    ) -> list[str]:
         """
         Insere múltiplas scored_offers em 1 transação (1 commit).
 
         entries: lista de dicts com keys:
             product_id, rule_score, final_score, status,
             ai_score (opcional), ai_description (opcional).
+        offer_ids: lista de UUIDs pré-definidos (ex: vindos do Supabase).
+            Se fornecida, deve ter o mesmo tamanho de entries.
 
         Returns:
             Lista de UUIDs gerados para cada entrada.
@@ -1194,8 +1223,8 @@ class SQLiteFallback:
         ids: list[str] = []
         try:
             rows = []
-            for e in entries:
-                row_id = str(uuid.uuid4())
+            for i, e in enumerate(entries):
+                row_id = (offer_ids[i] if offer_ids else None) or str(uuid.uuid4())
                 ids.append(row_id)
                 rows.append(
                     (
@@ -1244,7 +1273,6 @@ class SQLiteFallback:
         self,
         scored_offer_id: str,
         channel: str,
-        shlink_short_url: str = "",
     ) -> bool:
         """Registra o envio de uma oferta para um canal."""
         now = datetime.now(tz=timezone.utc).isoformat()
@@ -1252,14 +1280,13 @@ class SQLiteFallback:
             await self._db.execute(
                 """
                 INSERT INTO sent_offers
-                    (id, scored_offer_id, channel, shlink_short_url, sent_at)
-                VALUES (?,?,?,?,?)
+                    (id, scored_offer_id, channel, sent_at)
+                VALUES (?,?,?,?)
                 """,
                 (
                     str(uuid.uuid4()),
                     scored_offer_id,
                     channel,
-                    shlink_short_url,
                     now,
                 ),
             )
@@ -1730,6 +1757,71 @@ class SQLiteFallback:
             raise SQLiteError(
                 str(exc), operation="save_affiliate_links_batch"
             ) from exc
+
+    # ------------------------------------------------------------------
+    # Image Worker
+    # ------------------------------------------------------------------
+
+    async def get_pending_images(self, batch_size: int = 5) -> list[dict]:
+        """Retorna produtos que precisam de processamento de imagem."""
+        try:
+            cursor = await self._db.execute(
+                """
+                SELECT id, ml_id, title, thumbnail_url
+                FROM products
+                WHERE image_status = 'pending'
+                ORDER BY last_seen_at DESC
+                LIMIT ?
+                """,
+                (batch_size,),
+            )
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "ml_id": row[1],
+                    "title": row[2],
+                    "thumbnail_url": row[3],
+                }
+                for row in rows
+            ]
+        except Exception as exc:
+            raise SQLiteError(str(exc), operation="get_pending_images") from exc
+
+    async def update_image_status(
+        self,
+        product_id: str,
+        status: str,
+        enhanced_url: str | None = None,
+    ) -> bool:
+        """Atualiza o status de processamento de imagem de um produto."""
+        try:
+            if enhanced_url:
+                await self._db.execute(
+                    "UPDATE products SET image_status = ?, enhanced_image_url = ? WHERE id = ?",
+                    (status, enhanced_url, product_id),
+                )
+            else:
+                await self._db.execute(
+                    "UPDATE products SET image_status = ? WHERE id = ?",
+                    (status, product_id),
+                )
+            await self._db.commit()
+            return True
+        except Exception as exc:
+            raise SQLiteError(str(exc), operation="update_image_status") from exc
+
+    async def get_enhanced_image_url(self, product_id: str) -> str | None:
+        """Retorna a URL da imagem aprimorada, se existir."""
+        try:
+            cursor = await self._db.execute(
+                "SELECT enhanced_image_url FROM products WHERE id = ? AND image_status = 'enhanced'",
+                (product_id,),
+            )
+            row = await cursor.fetchone()
+            return row[0] if row and row[0] else None
+        except Exception:
+            return None
 
     # ------------------------------------------------------------------
     # Métricas locais

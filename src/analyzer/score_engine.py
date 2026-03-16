@@ -262,7 +262,7 @@ class ScoreEngine:
         for s in scored:
             if not s.passed:
                 b = s.breakdown
-                logger.info(
+                logger.debug(
                     "product_rejected",
                     ml_id=s.product.ml_id,
                     score=s.score,

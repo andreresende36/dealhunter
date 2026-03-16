@@ -76,7 +76,7 @@ class HealthCheck:
             self._check_supabase(),
             self._check_telegram(),
             self._check_whatsapp(),
-            self._check_anthropic(),
+            self._check_openrouter(),
             return_exceptions=True,
         )
 
@@ -173,24 +173,25 @@ class HealthCheck:
         except Exception as exc:
             return ServiceStatus(name="whatsapp", healthy=False, error=str(exc))
 
-    async def _check_anthropic(self) -> ServiceStatus:
-        """Verifica se a chave da API Anthropic é válida."""
-        cfg = settings.claude
+    async def _check_openrouter(self) -> ServiceStatus:
+        """Verifica se a chave do OpenRouter é válida."""
+        api_key = settings.openrouter.api_key
+        if not api_key:
+            return ServiceStatus(
+                name="openrouter", healthy=False, error="OPENROUTER_API_KEY not set"
+            )
         start = time.monotonic()
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(
-                    "https://api.anthropic.com/v1/models",
-                    headers={
-                        "x-api-key": cfg.api_key,
-                        "anthropic-version": "2023-06-01",
-                    },
+                    "https://openrouter.ai/api/v1/models",
+                    headers={"Authorization": f"Bearer {api_key}"},
                 )
             latency = (time.monotonic() - start) * 1000
             return ServiceStatus(
-                name="anthropic",
+                name="openrouter",
                 healthy=response.status_code == 200,
                 latency_ms=latency,
             )
         except Exception as exc:
-            return ServiceStatus(name="anthropic", healthy=False, error=str(exc))
+            return ServiceStatus(name="openrouter", healthy=False, error=str(exc))

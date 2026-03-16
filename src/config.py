@@ -80,34 +80,6 @@ class WhatsAppConfig:
 
 
 # ---------------------------------------------------------------------------
-# Claude API (Anthropic)
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class ClaudeConfig:
-    api_key: str = field(default_factory=lambda: os.environ["ANTHROPIC_API_KEY"])
-    model: str = field(
-        default_factory=lambda: os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
-    )
-    max_tokens: int = int(os.getenv("CLAUDE_MAX_TOKENS", "1024"))
-    # Temperatura para análise de ofertas (0 = determinístico)
-    temperature: float = float(os.getenv("CLAUDE_TEMPERATURE", "0.2"))
-
-
-# ---------------------------------------------------------------------------
-# Shlink (encurtador de links)
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class ShlinkConfig:
-    api_url: str = field(default_factory=lambda: os.getenv("SHLINK_API_URL", ""))
-    api_key: str = field(default_factory=lambda: os.getenv("SHLINK_API_KEY", ""))
-    domain: str = field(default_factory=lambda: os.getenv("SHLINK_DOMAIN", ""))
-
-
-# ---------------------------------------------------------------------------
 # Mercado Livre Afiliados
 # ---------------------------------------------------------------------------
 
@@ -201,6 +173,33 @@ class OpenRouterConfig:
 
 
 # ---------------------------------------------------------------------------
+# Serper.dev (busca de imagens)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class SerperConfig:
+    api_key: str = field(default_factory=lambda: os.getenv("SERPER_API_KEY", ""))
+    max_results: int = int(os.getenv("SERPER_MAX_RESULTS", "8"))
+
+
+# ---------------------------------------------------------------------------
+# Image Worker
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ImageWorkerConfig:
+    enabled: bool = os.getenv("IMAGE_WORKER_ENABLED", "true").lower() == "true"
+    poll_interval: int = int(os.getenv("IMAGE_WORKER_POLL_INTERVAL", "30"))
+    batch_size: int = int(os.getenv("IMAGE_WORKER_BATCH_SIZE", "5"))
+    min_resolution: int = int(os.getenv("IMAGE_WORKER_MIN_RESOLUTION", "400"))
+    white_bg_threshold: float = float(os.getenv("IMAGE_WORKER_WHITE_BG_THRESHOLD", "0.70"))
+    max_candidates_for_ai: int = int(os.getenv("IMAGE_WORKER_MAX_CANDIDATES_AI", "5"))
+    supabase_bucket: str = os.getenv("IMAGE_WORKER_BUCKET", "images")
+
+
+# ---------------------------------------------------------------------------
 # n8n
 # ---------------------------------------------------------------------------
 
@@ -235,12 +234,12 @@ class Settings:
     supabase: SupabaseConfig = field(default_factory=SupabaseConfig)
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     whatsapp: WhatsAppConfig = field(default_factory=WhatsAppConfig)
-    claude: ClaudeConfig = field(default_factory=ClaudeConfig)
-    shlink: ShlinkConfig = field(default_factory=ShlinkConfig)
     mercado_livre: MercadoLivreConfig = field(default_factory=MercadoLivreConfig)
     scraper: ScraperConfig = field(default_factory=ScraperConfig)
     score: ScoreConfig = field(default_factory=ScoreConfig)
     openrouter: OpenRouterConfig = field(default_factory=OpenRouterConfig)
+    serper: SerperConfig = field(default_factory=SerperConfig)
+    image_worker: ImageWorkerConfig = field(default_factory=ImageWorkerConfig)
     n8n: N8nConfig = field(default_factory=N8nConfig)
     sqlite: SQLiteConfig = field(default_factory=SQLiteConfig)
 

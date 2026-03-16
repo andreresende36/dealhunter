@@ -121,6 +121,7 @@ class MessageFormatter:
         custom_title: Optional[str] = None,
         custom_description: Optional[str] = None,
         hashtags: Optional[list[str]] = None,
+        enhanced_image_url: Optional[str] = None,
     ) -> FormattedMessage:
         """Gera mensagem formatada para Telegram e WhatsApp."""
 
@@ -186,10 +187,13 @@ class MessageFormatter:
             link=short_link,
         )
 
+        # Usa imagem aprimorada se disponível, senão a thumbnail original
+        image_url = enhanced_image_url or product.image_url or None
+
         return FormattedMessage(
             telegram_text=telegram_text,
             whatsapp_text=whatsapp_text,
-            image_url=product.image_url or None,
+            image_url=image_url,
             short_link=short_link,
             product_ml_id=product.ml_id,
         )

@@ -559,7 +559,6 @@ class SupabaseClient:
         self,
         scored_offer_id: str,
         channel: str,
-        shlink_short_url: str = "",
     ) -> bool:
         """
         Registra o envio de uma oferta para um canal específico.
@@ -567,7 +566,6 @@ class SupabaseClient:
         Args:
             scored_offer_id: UUID do scored_offer enviado
             channel: "telegram" ou "whatsapp"
-            shlink_short_url: URL encurtada gerada pelo Shlink
 
         Returns:
             True se registrado com sucesso, False em caso de erro.
@@ -575,13 +573,12 @@ class SupabaseClient:
         data = {
             "scored_offer_id": scored_offer_id,
             "channel": channel,
-            "shlink_short_url": shlink_short_url,
             "sent_at": datetime.now(tz=timezone.utc).isoformat(),
             "clicks": 0,
         }
         try:
             await self._db.table("sent_offers").insert(data).execute()
-            logger.info(
+            logger.debug(
                 "offer_marked_sent",
                 scored_offer_id=scored_offer_id,
                 channel=channel,
@@ -619,7 +616,7 @@ class SupabaseClient:
     async def update_click_count(
         self, scored_offer_id: str, channel: str, clicks: int
     ) -> bool:
-        """Atualiza o contador de cliques de um envio (chamado pelo Shlink webhook)."""
+        """Atualiza o contador de cliques de um envio."""
         try:
             await (
                 self._db.table("sent_offers")
@@ -828,6 +825,63 @@ class SupabaseClient:
             raise SupabaseError(
                 str(exc), operation="save_affiliate_links_batch"
             ) from exc
+
+    # ------------------------------------------------------------------
+    # Image Worker
+    # ------------------------------------------------------------------
+
+    async def get_pending_images(self, batch_size: int = 5) -> list[dict]:
+        """Retorna produtos que precisam de processamento de imagem."""
+        try:
+            result = (
+                await self._db.table("products")
+                .select("id, ml_id, title, thumbnail_url")
+                .eq("image_status", "pending")
+                .order("last_seen_at", desc=True)
+                .limit(batch_size)
+                .execute()
+            )
+            return result.data or []
+        except Exception as exc:
+            raise SupabaseError(str(exc), operation="get_pending_images") from exc
+
+    async def update_image_status(
+        self,
+        product_id: str,
+        status: str,
+        enhanced_url: str | None = None,
+    ) -> bool:
+        """Atualiza o status de processamento de imagem de um produto."""
+        data: dict = {"image_status": status}
+        if enhanced_url:
+            data["enhanced_image_url"] = enhanced_url
+        try:
+            await (
+                self._db.table("products")
+                .update(data)
+                .eq("id", product_id)
+                .execute()
+            )
+            return True
+        except Exception as exc:
+            raise SupabaseError(str(exc), operation="update_image_status") from exc
+
+    async def get_enhanced_image_url(self, product_id: str) -> str | None:
+        """Retorna a URL da imagem aprimorada, se existir."""
+        try:
+            result = (
+                await self._db.table("products")
+                .select("enhanced_image_url")
+                .eq("id", product_id)
+                .eq("image_status", "enhanced")
+                .limit(1)
+                .execute()
+            )
+            if result.data and result.data[0].get("enhanced_image_url"):
+                return result.data[0]["enhanced_image_url"]
+            return None
+        except Exception as exc:
+            raise SupabaseError(str(exc), operation="get_enhanced_image_url") from exc
 
     # ------------------------------------------------------------------
     # Helpers internos

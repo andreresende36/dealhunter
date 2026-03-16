@@ -114,19 +114,29 @@ async def run_pipeline() -> dict:
         )
         rejected_products = [s for s in all_scored if not s.passed]
 
-        # Log resumido dos rejeitados — detalhes completos no index.html de debug
+        # Resumo consolidado da avaliação (detalhes por item no debug report)
+        reject_reasons: dict[str, int] = {}
         for s in rejected_products:
-            logger.info(
-                "product_rejected",
-                ml_id=s.product.ml_id,
-                score=round(s.score, 1),
-                reason=s.reject_reason,
-            )
+            reason = s.reject_reason or "unknown"
+            if reason.startswith("Score"):
+                reason = "score_baixo"
+            elif reason.startswith("Desconto"):
+                reason = "desconto_baixo"
+            elif reason.startswith("Avaliacao"):
+                reason = "avaliacao_baixa"
+            elif reason.startswith("Apenas"):
+                reason = "poucas_avaliacoes"
+            elif reason.startswith("Preco"):
+                reason = "preco_invalido"
+            elif reason.startswith("Titulo"):
+                reason = "titulo_curto"
+            reject_reasons[reason] = reject_reasons.get(reason, 0) + 1
         logger.info(
-            "batch_evaluated",
+            "score_summary",
             total=len(genuine_products),
             approved=len(scored_products),
             rejected=len(rejected_products),
+            reject_reasons=reject_reasons or None,
         )
 
         stats["scored"] = len(genuine_products)
@@ -221,6 +231,8 @@ async def run_pipeline() -> dict:
                         telegram_bot = TelegramBot()
                         formatter = MessageFormatter()
 
+                        failed_ids: list[str] = []
+
                         for idx, s in enumerate(scored_products):
                             product = s.product
                             product_id = ids.get(product.ml_id)
@@ -251,29 +263,22 @@ async def run_pipeline() -> dict:
                                         await storage.mark_as_sent(
                                             scored_offer_id,
                                             channel="telegram",
-                                            shlink_short_url=short_url,
                                         )
                                     except Exception as exc_mark:
-                                        logger.warning(
+                                        logger.debug(
                                             "mark_as_sent_failed",
                                             ml_id=product.ml_id,
                                             error=str(exc_mark),
                                         )
                             else:
                                 stats["publish_errors"] += 1
-                                for r in results:
-                                    if r.get("error"):
-                                        logger.warning(
-                                            "telegram_publish_failed",
-                                            ml_id=product.ml_id,
-                                            group_id=r["group_id"],
-                                            error=r["error"],
-                                        )
+                                failed_ids.append(product.ml_id)
 
                         logger.info(
                             "telegram_publish_done",
                             published=stats["published"],
                             errors=stats["publish_errors"],
+                            failed_ids=failed_ids or None,
                         )
                     except Exception as exc_tg:
                         logger.error("telegram_publish_error", error=str(exc_tg))

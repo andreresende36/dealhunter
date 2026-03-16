@@ -71,7 +71,7 @@ class TelegramBot:
 
             result["success"] = True
             result["message_id"] = sent.message_id
-            logger.info(
+            logger.debug(
                 "telegram_sent",
                 group_id=group_id,
                 message_id=sent.message_id,
@@ -112,7 +112,7 @@ class TelegramBot:
                     )
                 result["success"] = True
                 result["message_id"] = sent.message_id
-                logger.info(
+                logger.debug(
                     "telegram_sent_plaintext_fallback",
                     group_id=group_id,
                     message_id=sent.message_id,

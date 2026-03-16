@@ -178,14 +178,13 @@ CREATE INDEX IF NOT EXISTS idx_scored_offers_final_score
 -- =============================================================================
 -- 5. sent_offers
 -- Registra cada envio para WhatsApp ou Telegram.
--- Permite detectar duplicatas e rastrear cliques via Shlink.
+-- Permite detectar duplicatas e rastrear envios por canal.
 -- Uma scored_offer pode ser enviada para múltiplos canais (1 linha por canal).
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS sent_offers (
     id                  UUID    DEFAULT uuid_generate_v4() PRIMARY KEY,
     scored_offer_id     UUID    NOT NULL REFERENCES scored_offers(id) ON DELETE CASCADE,
     channel             TEXT    NOT NULL CHECK (channel IN ('telegram', 'whatsapp')),
-    shlink_short_url    TEXT    NOT NULL DEFAULT '',
     sent_at             TIMESTAMPTZ DEFAULT NOW(),
     clicks              INTEGER DEFAULT 0
 );
