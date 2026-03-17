@@ -8,7 +8,7 @@ Processo long-running com 2 coroutines:
 import asyncio
 import random
 import signal
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import structlog
@@ -20,6 +20,8 @@ from src.main import run_pipeline
 from src.sender import send_next_offer
 from src.monitoring.alert_bot import AlertBot
 from src.monitoring.health_check import HealthCheck
+from src.monitoring.state import MonitorState
+import uvicorn
 
 setup_logging()
 logger = structlog.get_logger(__name__)
@@ -64,6 +66,7 @@ async def scraper_loop(
             except Exception:
                 pass
 
+        MonitorState.next_scrape_time = datetime.now() + timedelta(seconds=interval)
         await _interruptible_sleep(interval, shutdown)
 
 
@@ -77,7 +80,9 @@ async def sender_loop(
     max_interval = settings.sender.max_interval
 
     while not shutdown.is_set():
-        if not is_sending_hours():
+        is_sending = is_sending_hours()
+        MonitorState.is_sending_hours = is_sending
+        if not is_sending:
             tz = ZoneInfo(settings.sender.timezone)
             now = datetime.now(tz)
             logger.debug(
@@ -86,6 +91,7 @@ async def sender_loop(
                 window=f"{settings.sender.start_hour}h-{settings.sender.end_hour}h",
             )
             # Verifica a cada 60s se entrou no horário
+            MonitorState.next_send_time = datetime.now() + timedelta(seconds=60)
             await _interruptible_sleep(60, shutdown)
             continue
 
@@ -103,7 +109,24 @@ async def sender_loop(
         # Intervalo aleatório entre envios
         delay_minutes = random.randint(min_interval, max_interval)
         logger.debug("sender_next_in", minutes=delay_minutes)
+        MonitorState.next_send_time = datetime.now() + timedelta(minutes=delay_minutes)
         await _interruptible_sleep(delay_minutes * 60, shutdown)
+
+
+async def api_loop(shutdown: asyncio.Event) -> None:
+    """Roda a API web usando Uvicorn."""
+    config = uvicorn.Config(
+        "src.api.monitor:app", host="0.0.0.0", port=8000, log_level="warning"
+    )
+    server = uvicorn.Server(config)
+
+    # Faz o server encerrar junto com o shutdown event
+    async def watch_shutdown():
+        await shutdown.wait()
+        server.should_exit = True
+
+    asyncio.create_task(watch_shutdown())
+    await server.serve()
 
 
 async def main() -> None:
@@ -141,6 +164,7 @@ async def main() -> None:
         await asyncio.gather(
             scraper_loop(storage, shutdown, alert_bot),
             sender_loop(storage, shutdown, alert_bot),
+            api_loop(shutdown),
         )
 
     logger.info("runner_shutdown_complete")

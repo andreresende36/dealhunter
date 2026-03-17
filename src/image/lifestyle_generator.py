@@ -33,7 +33,7 @@ OPENROUTER_HEADERS_BASE = {
     "X-Title": "DealHunter",
 }
 
-HAIKU_MODEL = "anthropic/claude-haiku-4-5-20251001"
+HAIKU_MODEL = "anthropic/claude-haiku-4-5"
 GEMINI_MODEL = "google/gemini-2.5-flash-image"
 
 ANALYSIS_SYSTEM_PROMPT = """\
@@ -123,23 +123,27 @@ def _step1_analyze_product(image_b64: str, media_type: str) -> dict:
                 "temperature": 0.3,
             },
         )
+        if not resp.is_success:
+            logger.error("haiku_api_error", status=resp.status_code, body=resp.text[:400])
         resp.raise_for_status()
 
     data = resp.json()
     raw_text = data["choices"][0]["message"]["content"].strip()
 
-    # Remove possíveis backticks markdown
-    cleaned = raw_text
-    if cleaned.startswith("```"):
-        cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
-    if cleaned.endswith("```"):
-        cleaned = cleaned[:-3]
-    cleaned = cleaned.strip()
+    # Extrai o JSON pela posição do primeiro '{' e último '}' — robusto contra
+    # texto extra antes/depois do bloco markdown ou respostas mistas
+    start = raw_text.find("{")
+    end = raw_text.rfind("}") + 1
+    if start == -1 or end == 0:
+        logger.error("haiku_no_json_found", raw=raw_text[:300])
+        raise RuntimeError("Haiku não retornou JSON válido")
+
+    cleaned = raw_text[start:end]
 
     try:
         result = json.loads(cleaned)
     except json.JSONDecodeError as e:
-        logger.error("haiku_invalid_json", raw=raw_text[:200], error=str(e))
+        logger.error("haiku_invalid_json", raw=raw_text[:300], error=str(e))
         raise RuntimeError("Haiku não retornou JSON válido") from e
 
     logger.info(
@@ -188,42 +192,56 @@ def _step2_generate_image(prompt: str, image_b64: str, media_type: str) -> bytes
                 ],
             },
         )
+        if not resp.is_success:
+            logger.error("gemini_api_error", status=resp.status_code, body=resp.text[:400])
         resp.raise_for_status()
 
     data = resp.json()
     message = data["choices"][0]["message"]
+
+    # O OpenRouter pode retornar a imagem gerada em 3 locais distintos:
+    # 1. message.images[]  — campo dedicado do OpenRouter para imagens geradas (Gemini)
+    # 2. message.content[] — lista de parts multimodais (alguns modelos)
+    # 3. message.content   — string com data URI ou base64 puro
+
+    # Formato 1: message.images (Gemini 2.5 Flash Image via OpenRouter)
+    images = message.get("images")
+    if isinstance(images, list) and images:
+        img_entry = images[0]
+        url = img_entry.get("image_url", {}).get("url", "") if isinstance(img_entry, dict) else ""
+        if url.startswith("data:"):
+            b64_data = url.split(",", 1)[1]
+            image_bytes = base64.b64decode(b64_data)
+            logger.info("gemini_image_generated_from_images_field")
+            return _ensure_jpeg(image_bytes)
+
     content = message.get("content")
 
-    # O OpenRouter pode retornar imagem de diferentes formas:
-    # 1. content é uma lista com parts (multimodal)
-    # 2. content é uma string com base64 inline
+    # Formato 2: content como lista de parts multimodais
     if isinstance(content, list):
         for part in content:
-            if isinstance(part, dict):
-                # Formato: {"type": "image_url", "image_url": {"url": "data:image/...;base64,..."}}
-                if part.get("type") == "image_url":
-                    url = part.get("image_url", {}).get("url", "")
-                    if url.startswith("data:"):
-                        b64_data = url.split(",", 1)[1]
-                        image_bytes = base64.b64decode(b64_data)
-                        logger.info("gemini_image_generated_from_parts")
-                        return _ensure_jpeg(image_bytes)
-    elif isinstance(content, str):
-        # Pode ser base64 puro ou data URI
+            if isinstance(part, dict) and part.get("type") == "image_url":
+                url = part.get("image_url", {}).get("url", "")
+                if url.startswith("data:"):
+                    b64_data = url.split(",", 1)[1]
+                    image_bytes = base64.b64decode(b64_data)
+                    logger.info("gemini_image_generated_from_parts")
+                    return _ensure_jpeg(image_bytes)
+
+    # Formato 3: content como string (data URI ou base64 puro)
+    if isinstance(content, str):
         if content.startswith("data:image"):
             b64_data = content.split(",", 1)[1]
             image_bytes = base64.b64decode(b64_data)
             logger.info("gemini_image_generated_from_data_uri")
             return _ensure_jpeg(image_bytes)
-        # Tenta como base64 puro (sem prefixo)
         try:
             image_bytes = base64.b64decode(content)
-            if len(image_bytes) > 1000:  # provavelmente é uma imagem
+            if len(image_bytes) > 1000:
                 logger.info("gemini_image_generated_from_raw_b64")
                 return _ensure_jpeg(image_bytes)
         except Exception:
             pass
-        # Se é texto, o Gemini não gerou imagem
         logger.warning("gemini_returned_text_instead", text=content[:200])
 
     raise RuntimeError(
@@ -233,11 +251,15 @@ def _step2_generate_image(prompt: str, image_b64: str, media_type: str) -> bytes
 
 
 def _ensure_jpeg(image_bytes: bytes) -> bytes:
-    """Converte quaisquer bytes de imagem para JPEG com quality 85."""
+    """Converte quaisquer bytes de imagem para JPEG com quality 85.
+
+    JPEG suporta apenas RGB/L. Converte P (palette/GIF), RGBA, LA e outros
+    modos para RGB antes de salvar.
+    """
     from PIL import Image
 
     img = Image.open(BytesIO(image_bytes))
-    if img.mode == "RGBA":
+    if img.mode not in ("RGB", "L"):
         img = img.convert("RGB")
     buf = BytesIO()
     img.save(buf, format="JPEG", quality=85)
@@ -277,8 +299,11 @@ async def generate_lifestyle_image(thumbnail_url: str) -> bytes | None:
         logger.error("lifestyle_thumbnail_download_failed", url=thumbnail_url[:80])
         return None
 
+    # Normaliza para JPEG antes de enviar ao Haiku — thumbnails do ML podem ser
+    # webp, gif ou jpeg com content-type incorreto; o Anthropic rejeita mismatches.
+    image_bytes = _ensure_jpeg(image_bytes)
     image_b64 = base64.b64encode(image_bytes).decode("utf-8")
-    media_type = "image/jpeg"  # thumbnails do ML são JPEG
+    media_type = "image/jpeg"
 
     # Roda pipeline sync em thread (httpx sync)
     loop = asyncio.get_running_loop()
@@ -291,5 +316,12 @@ async def generate_lifestyle_image(thumbnail_url: str) -> bytes | None:
         )
         return result
     except Exception as exc:
-        logger.error("lifestyle_generation_failed", error=str(exc))
+        # Loga o corpo da resposta HTTP em erros 4xx/5xx para facilitar debug
+        detail = str(exc)
+        if hasattr(exc, "response"):
+            try:
+                detail = exc.response.text[:400]  # type: ignore[union-attr]
+            except Exception:
+                pass
+        logger.error("lifestyle_generation_failed", error=detail)
         return None

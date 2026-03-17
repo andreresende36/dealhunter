@@ -368,6 +368,13 @@ class SQLiteFallback:
         except Exception:
             pass
 
+        # Remoção de colunas obsoletas (Shlink removido)
+        try:
+            await self._db.execute("ALTER TABLE sent_offers DROP COLUMN shlink_short_url")
+            await self._db.commit()
+        except Exception:
+            pass  # Coluna já removida ou nunca existiu
+
         # Seed de dados canônicos (idempotente)
         await self._seed_lookup_tables()
 
@@ -1379,6 +1386,24 @@ class SQLiteFallback:
             return dict(zip(cols, row))
         except Exception as exc:
             raise SQLiteError(str(exc), operation="get_next_unsent_offer") from exc
+
+    async def get_pending_scored_offers(self, limit: int = 50) -> list[dict]:
+        """
+        Retorna ofertas aprovadas ainda não enviadas.
+        Equivalente SQLite da view vw_approved_unsent.
+        """
+        try:
+            cursor = await self._db.execute(
+                "SELECT * FROM vw_approved_unsent LIMIT ?",
+                (limit,)
+            )
+            rows = await cursor.fetchall()
+            if not rows:
+                return []
+            cols = [d[0] for d in cursor.description]
+            return [dict(zip(cols, row)) for row in rows]
+        except Exception as exc:
+            raise SQLiteError(str(exc), operation="get_pending_scored_offers") from exc
 
     # ------------------------------------------------------------------
     # system_logs

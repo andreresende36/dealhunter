@@ -60,7 +60,7 @@ async def upload_to_supabase(
             file_options={"content-type": content_type, "upsert": "true"},
         )
 
-        public_url = client.storage.from_(bucket).get_public_url(path)
+        public_url = await client.storage.from_(bucket).get_public_url(path)
 
         logger.info(
             "image_uploaded",
@@ -102,7 +102,7 @@ async def get_enhanced_url(product_id: str) -> str | None:
         for f in (files or []):
             name = f.get("name", "")
             if name.startswith("enhanced."):
-                return client.storage.from_(bucket).get_public_url(
+                return await client.storage.from_(bucket).get_public_url(
                     f"products/{product_id}/{name}"
                 )
 

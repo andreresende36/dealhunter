@@ -62,3 +62,5 @@ respx==0.21.1                # Mock de chamadas httpx em testes
 ruff==0.9.2                  # Linter + formatter ultra-rápido
 mypy==1.14.1                 # Type checking
 ipython==8.31.0              # Shell interativo para debug
+fastapi==0.110.0
+uvicorn==0.28.0

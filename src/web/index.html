@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DealHunter Monitor</title>
+    <!-- Use Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="dark-theme">
+    <div class="app-container">
+        <!-- Header / Logo -->
+        <header class="header blur-glass">
+            <div class="logo">
+                <span class="logo-icon">🎯</span>
+                <h1>DealHunter <span class="accent">Monitor</span></h1>
+            </div>
+            <div class="status-indicator">
+                <span id="system-status-dot" class="status-dot online"></span>
+                <span id="system-status-text" class="status-text">Sistema Online</span>
+            </div>
+        </header>
+
+        <!-- Dashboard Widgets -->
+        <div class="widgets-grid">
+            <!-- Scraper Timer widget -->
+            <div class="widget card scraper-widget">
+                <div class="widget-icon">🤖</div>
+                <div class="widget-content">
+                    <h3>Próximo Scraping</h3>
+                    <div class="timer" id="timer-scraper">--:--:--</div>
+                    <div class="subtitle" id="time-scraper">Aguardando dados...</div>
+                </div>
+            </div>
+
+            <!-- Sender Timer widget -->
+            <div class="widget card sender-widget">
+                <div class="widget-icon" id="sender-icon">📤</div>
+                <div class="widget-content">
+                    <h3>Próximo Envio <span id="sender-status-badge" class="badge bg-green">Ativo</span></h3>
+                    <div class="timer" id="timer-sender">--:--:--</div>
+                    <div class="subtitle" id="time-sender">Aguardando dados...</div>
+                </div>
+            </div>
+
+            <!-- Queue Stats widget -->
+            <div class="widget card stats-widget">
+                <div class="widget-icon">📋</div>
+                <div class="widget-content">
+                    <h3>Fila de Envio</h3>
+                    <div class="stat-value" id="queue-count">0</div>
+                    <div class="subtitle">Ofertas pendentes</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content Area: Queue List -->
+        <main class="main-content">
+            <div class="section-header">
+                <h2>Fila de Ofertas (<span id="queue-list-count">0</span>)</h2>
+                <div class="controls">
+                    <button id="btn-refresh" class="btn btn-outline" title="Atualizar Agora">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.92-12.28l5.57 5.57"/></svg>
+                        Atualizar
+                    </button>
+                </div>
+            </div>
+
+            <div id="queue-container" class="queue-container">
+                <!-- Estado Inicial de Loading -->
+                <div class="loader-container" id="queue-loader">
+                    <div class="spinner"></div>
+                    <p>Carregando ofertas...</p>
+                </div>
+
+                <!-- Lista (Populada via JS) -->
+                <div class="queue-list" id="queue-list"></div>
+
+                <!-- Estado Vazio -->
+                <div class="empty-state" id="queue-empty" style="display: none;">
+                    <div class="empty-icon">📭</div>
+                    <h3>Fila Vazia</h3>
+                    <p>Todas as boas ofertas já foram enviadas ou o scraper ainda não rodou.</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Template for Queue Item (Instantiated per product via JS) -->
+    <template id="queue-item-template">
+        <div class="queue-item card">
+            <div class="item-ranking">
+                <span class="ranking-number">#1</span>
+            </div>
+            <div class="item-thumbnail">
+                <img src="" alt="Thumbnail" loading="lazy">
+                <div class="discount-badge">-0%</div>
+            </div>
+            <div class="item-details">
+                <h4 class="item-title">Product Title</h4>
+                <div class="item-meta">
+                    <span class="meta-tag meta-category">Category</span>
+                    <span class="meta-tag meta-badge" style="display: none;">Badge</span>
+                    <span class="meta-tag meta-shipping" style="display: none;">Frete Grátis 🚚</span>
+                </div>
+            </div>
+            <div class="item-price-info">
+                <div class="price-current">R$ 0,00</div>
+                <div class="price-original">R$ 0,00</div>
+            </div>
+            <div class="item-score">
+                <div class="score-circle">
+                    <svg viewBox="0 0 36 36" class="circular-chart">
+                        <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                        <path class="circle" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                    </svg>
+                    <div class="score-value">0</div>
+                </div>
+                <div class="score-label">Score</div>
+            </div>
+            <div class="item-actions">
+                <a href="#" target="_blank" class="btn btn-primary btn-sm action-link">Ver no ML</a>
+            </div>
+        </div>
+    </template>
+
+    <script src="app.js"></script>
+</body>
+</html>
