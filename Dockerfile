@@ -75,4 +75,4 @@ HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
     CMD python -c "from src.config import settings; print('ok')" || exit 1
 
 # Comando padrão — pode ser sobrescrito no docker-compose
-CMD ["python", "-m", "src.main"]
+CMD ["python", "-m", "src.runner"]
