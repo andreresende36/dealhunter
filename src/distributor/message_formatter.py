@@ -13,18 +13,22 @@ from src.scraper.base_scraper import ScrapedProduct
 
 logger = structlog.get_logger(__name__)
 
-# Caracteres que o MarkdownV2 do Telegram exige escape com '\'
-_MDV2_ESCAPE_CHARS = r'_*[]()~`>#+-=|{}.!'
+# Tabela de tradução pré-computada para MarkdownV2 (str.translate é ~5-10x mais rápido
+# que iterar char-a-char). Mapeia cada char reservado para '\\' + char.
+_MDV2_TRANS: dict[int, str] = {
+    ord(c): f'\\{c}' for c in r'_*[]()~`>#+-=|{}.!'
+}
+
+# Para URLs: mesmos chars reservados exceto os estruturais de URL
+_MDV2_URL_UNSAFE: frozenset[str] = frozenset(r'_*[]()~`>#+-=|{}.!') - frozenset(':/?=&#@%+,;')
+_MDV2_URL_TRANS: dict[int, str] = {
+    ord(c): f'\\{c}' for c in _MDV2_URL_UNSAFE
+}
 
 
 def _escape_mdv2(text: str) -> str:
     """Escapa caracteres reservados do Telegram MarkdownV2."""
-    result = []
-    for ch in text:
-        if ch in _MDV2_ESCAPE_CHARS:
-            result.append('\\')
-        result.append(ch)
-    return ''.join(result)
+    return text.translate(_MDV2_TRANS)
 
 
 def _escape_mdv2_url(url: str) -> str:
@@ -32,16 +36,9 @@ def _escape_mdv2_url(url: str) -> str:
 
     Conforme a spec do Telegram, dentro de () apenas ')' e '\\' precisam escape.
     Na prática, o parser também quebra com outros chars — escapamos tudo que é reservado
-    exceto ':', '/' e '?' que são essenciais para URLs.
+    exceto ':', '/', '?' e demais estruturais de URL.
     """
-    # Chars que NÃO devem ser escapados em URLs (estruturais)
-    url_safe = set(':/?=&#@%+,;')
-    result = []
-    for ch in url:
-        if ch in _MDV2_ESCAPE_CHARS and ch not in url_safe:
-            result.append('\\')
-        result.append(ch)
-    return ''.join(result)
+    return url.translate(_MDV2_URL_TRANS)
 
 
 # Emojis por faixa de desconto

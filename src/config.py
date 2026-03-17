@@ -6,7 +6,6 @@ Lê todas as variáveis de ambiente e expõe configurações tipadas para o sist
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 from dotenv import load_dotenv
 
@@ -50,7 +49,9 @@ class TelegramConfig:
         default_factory=lambda: os.getenv("TELEGRAM_ADMIN_CHAT_ID", "")
     )
     # Delay entre mensagens para evitar flood (segundos)
-    send_delay: float = float(os.getenv("TELEGRAM_SEND_DELAY", "1.5"))
+    send_delay: float = field(
+        default_factory=lambda: float(os.getenv("TELEGRAM_SEND_DELAY", "1.5"))
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -74,9 +75,13 @@ class WhatsAppConfig:
         ]
     )
     # Delay entre mensagens para evitar flood/ban (segundos)
-    send_delay: float = float(os.getenv("WHATSAPP_SEND_DELAY", "3.0"))
+    send_delay: float = field(
+        default_factory=lambda: float(os.getenv("WHATSAPP_SEND_DELAY", "3.0"))
+    )
     # Máximo de mensagens por minuto (rate limit)
-    max_messages_per_minute: int = int(os.getenv("WHATSAPP_MAX_MSG_PER_MIN", "10"))
+    max_messages_per_minute: int = field(
+        default_factory=lambda: int(os.getenv("WHATSAPP_MAX_MSG_PER_MIN", "10"))
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -119,22 +124,40 @@ class MercadoLivreConfig:
 @dataclass
 class ScraperConfig:
     # Delays em segundos (min, max)
-    delay_min: float = float(os.getenv("SCRAPER_DELAY_MIN", "2.0"))
-    delay_max: float = float(os.getenv("SCRAPER_DELAY_MAX", "5.0"))
+    delay_min: float = field(
+        default_factory=lambda: float(os.getenv("SCRAPER_DELAY_MIN", "2.0"))
+    )
+    delay_max: float = field(
+        default_factory=lambda: float(os.getenv("SCRAPER_DELAY_MAX", "5.0"))
+    )
     # Timeout de página em ms
-    page_timeout: int = int(os.getenv("SCRAPER_PAGE_TIMEOUT", "30000"))
+    page_timeout: int = field(
+        default_factory=lambda: int(os.getenv("SCRAPER_PAGE_TIMEOUT", "30000"))
+    )
     # Headless mode para Playwright
-    headless: bool = os.getenv("SCRAPER_HEADLESS", "true").lower() == "true"
+    headless: bool = field(
+        default_factory=lambda: os.getenv("SCRAPER_HEADLESS", "true").lower() == "true"
+    )
     # Número máximo de retentativas por página
-    max_retries: int = int(os.getenv("SCRAPER_MAX_RETRIES", "3"))
+    max_retries: int = field(
+        default_factory=lambda: int(os.getenv("SCRAPER_MAX_RETRIES", "3"))
+    )
     # Número máximo de páginas por fonte
-    max_pages: int = int(os.getenv("SCRAPER_MAX_PAGES", "10"))
+    max_pages: int = field(
+        default_factory=lambda: int(os.getenv("SCRAPER_MAX_PAGES", "10"))
+    )
     # Proxy (opcional): "http://user:pass@host:port"
-    proxy_url: Optional[str] = field(
+    proxy_url: str | None = field(
         default_factory=lambda: os.getenv("SCRAPER_PROXY_URL")
     )
     # Debug: salva screenshots dos cards rejeitados pelo score engine
-    debug_screenshots: bool = os.getenv("SCRAPER_DEBUG_SCREENSHOTS", "false").lower() == "true"
+    debug_screenshots: bool = field(
+        default_factory=lambda: os.getenv("SCRAPER_DEBUG_SCREENSHOTS", "false").lower() == "true"
+    )
+    # Intervalo entre ciclos de scraping (segundos)
+    interval: int = field(
+        default_factory=lambda: int(os.getenv("SCRAPER_INTERVAL", "3600"))
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -145,21 +168,43 @@ class ScraperConfig:
 @dataclass
 class ScoreConfig:
     # Desconto mínimo para considerar a oferta (%)
-    min_discount_pct: float = float(os.getenv("SCORE_MIN_DISCOUNT_PCT", "20.0"))
+    min_discount_pct: float = field(
+        default_factory=lambda: float(os.getenv("SCORE_MIN_DISCOUNT_PCT", "20.0"))
+    )
     # Pontuação mínima para publicar
-    min_score: int = int(os.getenv("SCORE_MIN_SCORE", "60"))
+    min_score: int = field(
+        default_factory=lambda: int(os.getenv("SCORE_MIN_SCORE", "60"))
+    )
     # Avaliação mínima do produto (estrelas)
-    min_rating: float = float(os.getenv("SCORE_MIN_RATING", "4.0"))
+    min_rating: float = field(
+        default_factory=lambda: float(os.getenv("SCORE_MIN_RATING", "4.0"))
+    )
     # Número mínimo de avaliações
-    min_reviews: int = int(os.getenv("SCORE_MIN_REVIEWS", "10"))
+    min_reviews: int = field(
+        default_factory=lambda: int(os.getenv("SCORE_MIN_REVIEWS", "10"))
+    )
     # Pesos por critério (soma = 100)
-    weight_discount: float = float(os.getenv("SCORE_WEIGHT_DISCOUNT", "30.0"))
-    weight_badge: float = float(os.getenv("SCORE_WEIGHT_BADGE", "15.0"))
-    weight_rating: float = float(os.getenv("SCORE_WEIGHT_RATING", "15.0"))
-    weight_reviews: float = float(os.getenv("SCORE_WEIGHT_REVIEWS", "10.0"))
-    weight_free_shipping: float = float(os.getenv("SCORE_WEIGHT_FREE_SHIPPING", "10.0"))
-    weight_installments: float = float(os.getenv("SCORE_WEIGHT_INSTALLMENTS", "10.0"))
-    weight_title_quality: float = float(os.getenv("SCORE_WEIGHT_TITLE_QUALITY", "10.0"))
+    weight_discount: float = field(
+        default_factory=lambda: float(os.getenv("SCORE_WEIGHT_DISCOUNT", "30.0"))
+    )
+    weight_badge: float = field(
+        default_factory=lambda: float(os.getenv("SCORE_WEIGHT_BADGE", "15.0"))
+    )
+    weight_rating: float = field(
+        default_factory=lambda: float(os.getenv("SCORE_WEIGHT_RATING", "15.0"))
+    )
+    weight_reviews: float = field(
+        default_factory=lambda: float(os.getenv("SCORE_WEIGHT_REVIEWS", "10.0"))
+    )
+    weight_free_shipping: float = field(
+        default_factory=lambda: float(os.getenv("SCORE_WEIGHT_FREE_SHIPPING", "10.0"))
+    )
+    weight_installments: float = field(
+        default_factory=lambda: float(os.getenv("SCORE_WEIGHT_INSTALLMENTS", "10.0"))
+    )
+    weight_title_quality: float = field(
+        default_factory=lambda: float(os.getenv("SCORE_WEIGHT_TITLE_QUALITY", "10.0"))
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -173,41 +218,38 @@ class OpenRouterConfig:
 
 
 # ---------------------------------------------------------------------------
-# Serper.dev (busca de imagens)
+# Sender (fila de envio com prioridade por score)
 # ---------------------------------------------------------------------------
 
 
 @dataclass
-class SerperConfig:
-    api_key: str = field(default_factory=lambda: os.getenv("SERPER_API_KEY", ""))
-    max_results: int = int(os.getenv("SERPER_MAX_RESULTS", "8"))
-
-
-# ---------------------------------------------------------------------------
-# Image Worker
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class ImageWorkerConfig:
-    enabled: bool = os.getenv("IMAGE_WORKER_ENABLED", "true").lower() == "true"
-    poll_interval: int = int(os.getenv("IMAGE_WORKER_POLL_INTERVAL", "30"))
-    batch_size: int = int(os.getenv("IMAGE_WORKER_BATCH_SIZE", "5"))
-    min_resolution: int = int(os.getenv("IMAGE_WORKER_MIN_RESOLUTION", "400"))
-    white_bg_threshold: float = float(os.getenv("IMAGE_WORKER_WHITE_BG_THRESHOLD", "0.70"))
-    max_candidates_for_ai: int = int(os.getenv("IMAGE_WORKER_MAX_CANDIDATES_AI", "5"))
-    supabase_bucket: str = os.getenv("IMAGE_WORKER_BUCKET", "images")
-
-
-# ---------------------------------------------------------------------------
-# n8n
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class N8nConfig:
-    webhook_url: str = field(default_factory=lambda: os.getenv("N8N_WEBHOOK_URL", ""))
-    api_key: str = field(default_factory=lambda: os.getenv("N8N_API_KEY", ""))
+class SenderConfig:
+    # Horário de envio (BRT)
+    start_hour: int = field(
+        default_factory=lambda: int(os.getenv("SENDER_START_HOUR", "8"))
+    )
+    end_hour: int = field(
+        default_factory=lambda: int(os.getenv("SENDER_END_HOUR", "23"))
+    )
+    # Intervalo entre envios (minutos) — escolhido aleatoriamente
+    min_interval: int = field(
+        default_factory=lambda: int(os.getenv("SENDER_MIN_INTERVAL", "3"))
+    )
+    max_interval: int = field(
+        default_factory=lambda: int(os.getenv("SENDER_MAX_INTERVAL", "6"))
+    )
+    # Timezone para controle de horário
+    timezone: str = field(
+        default_factory=lambda: os.getenv("SENDER_TIMEZONE", "America/Sao_Paulo")
+    )
+    # Bucket do Supabase Storage para imagens
+    supabase_bucket: str = field(
+        default_factory=lambda: os.getenv("SUPABASE_STORAGE_BUCKET", "images")
+    )
+    # Retries para geração de imagem lifestyle
+    image_max_retries: int = field(
+        default_factory=lambda: int(os.getenv("LIFESTYLE_MAX_RETRIES", "2"))
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -238,9 +280,7 @@ class Settings:
     scraper: ScraperConfig = field(default_factory=ScraperConfig)
     score: ScoreConfig = field(default_factory=ScoreConfig)
     openrouter: OpenRouterConfig = field(default_factory=OpenRouterConfig)
-    serper: SerperConfig = field(default_factory=SerperConfig)
-    image_worker: ImageWorkerConfig = field(default_factory=ImageWorkerConfig)
-    n8n: N8nConfig = field(default_factory=N8nConfig)
+    sender: SenderConfig = field(default_factory=SenderConfig)
     sqlite: SQLiteConfig = field(default_factory=SQLiteConfig)
 
     # Ambiente de execução

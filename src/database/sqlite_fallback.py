@@ -159,9 +159,7 @@ class SQLiteFallback:
             product_id     TEXT NOT NULL
                                REFERENCES products(id) ON DELETE CASCADE,
             rule_score     INTEGER NOT NULL,
-            ai_score       INTEGER,
             final_score    INTEGER NOT NULL,
-            ai_description TEXT,
             status         TEXT NOT NULL DEFAULT 'pending',
             scored_at      TEXT DEFAULT (datetime('now')),
             synced         INTEGER DEFAULT 0
@@ -261,7 +259,6 @@ class SQLiteFallback:
             c.name          AS category,
             so.id           AS scored_offer_id,
             so.final_score,
-            so.ai_description,
             so.scored_at
         FROM scored_offers so
         JOIN products p ON p.id = so.product_id
@@ -1154,8 +1151,6 @@ class SQLiteFallback:
         rule_score: int,
         final_score: int,
         status: str,
-        ai_score: Optional[int] = None,
-        ai_description: Optional[str] = None,
         offer_id: Optional[str] = None,
     ) -> Optional[str]:
         """
@@ -1174,17 +1169,14 @@ class SQLiteFallback:
             await self._db.execute(
                 """
                 INSERT INTO scored_offers (
-                    id, product_id, rule_score, ai_score, final_score,
-                    ai_description, status, scored_at
-                ) VALUES (?,?,?,?,?,?,?,?)
+                    id, product_id, rule_score, final_score, status, scored_at
+                ) VALUES (?,?,?,?,?,?)
                 """,
                 (
                     row_id,
                     product_id,
                     rule_score,
-                    ai_score,
                     final_score,
-                    ai_description,
                     status,
                     now,
                 ),
@@ -1209,8 +1201,7 @@ class SQLiteFallback:
         Insere múltiplas scored_offers em 1 transação (1 commit).
 
         entries: lista de dicts com keys:
-            product_id, rule_score, final_score, status,
-            ai_score (opcional), ai_description (opcional).
+            product_id, rule_score, final_score, status.
         offer_ids: lista de UUIDs pré-definidos (ex: vindos do Supabase).
             Se fornecida, deve ter o mesmo tamanho de entries.
 
@@ -1231,9 +1222,7 @@ class SQLiteFallback:
                         row_id,
                         e["product_id"],
                         e["rule_score"],
-                        e.get("ai_score"),
                         e["final_score"],
-                        e.get("ai_description"),
                         e["status"],
                         now,
                     )
@@ -1241,9 +1230,8 @@ class SQLiteFallback:
             await self._db.executemany(
                 """
                 INSERT OR IGNORE INTO scored_offers (
-                    id, product_id, rule_score, ai_score, final_score,
-                    ai_description, status, scored_at
-                ) VALUES (?,?,?,?,?,?,?,?)
+                    id, product_id, rule_score, final_score, status, scored_at
+                ) VALUES (?,?,?,?,?,?)
                 """,
                 rows,
             )
@@ -1268,6 +1256,28 @@ class SQLiteFallback:
             return await cursor.fetchone() is not None
         except Exception as exc:
             raise SQLiteError(str(exc), operation="has_recent_sends") from exc
+
+    async def get_recently_sent_ids(self, hours: int = 24) -> set[str]:
+        """
+        Retorna o conjunto de ml_ids enviados nas últimas N horas (1 query batch).
+        Substitui N chamadas a was_recently_sent() por uma única query.
+        """
+        cutoff = (datetime.now(tz=timezone.utc) - timedelta(hours=hours)).isoformat()
+        try:
+            cursor = await self._db.execute(
+                """
+                SELECT DISTINCT p.ml_id
+                FROM sent_offers se
+                JOIN scored_offers so ON so.id = se.scored_offer_id
+                JOIN products p       ON p.id  = so.product_id
+                WHERE se.sent_at >= ?
+                """,
+                (cutoff,),
+            )
+            rows = await cursor.fetchall()
+            return {row[0] for row in rows}
+        except Exception as exc:
+            raise SQLiteError(str(exc), operation="get_recently_sent_ids") from exc
 
     async def mark_as_sent(
         self,
@@ -1318,6 +1328,57 @@ class SQLiteFallback:
             raise SQLiteError(
                 str(exc), operation="was_recently_sent", ml_id=ml_id
             ) from exc
+
+    async def get_next_unsent_offer(self) -> dict | None:
+        """
+        Retorna a oferta aprovada de maior score ainda não enviada (LIMIT 1).
+        Equivalente SQLite da view vw_approved_unsent.
+        """
+        cutoff = (datetime.now(tz=timezone.utc) - timedelta(hours=24)).isoformat()
+        try:
+            cursor = await self._db.execute(
+                """
+                SELECT
+                    p.id            AS product_id,
+                    p.ml_id,
+                    p.title,
+                    p.current_price,
+                    p.original_price,
+                    p.discount_percent,
+                    p.free_shipping,
+                    p.thumbnail_url,
+                    p.product_url,
+                    p.rating_stars,
+                    p.rating_count,
+                    p.installments_without_interest,
+                    c.name          AS category,
+                    b.name          AS badge,
+                    so.id           AS scored_offer_id,
+                    so.final_score,
+                    so.scored_at
+                FROM scored_offers so
+                JOIN products p ON p.id = so.product_id
+                LEFT JOIN categories c ON c.id = p.category_id
+                LEFT JOIN badges b ON b.id = p.badge_id
+                WHERE so.status = 'approved'
+                  AND so.final_score >= 60
+                  AND NOT EXISTS (
+                      SELECT 1 FROM sent_offers se
+                      WHERE se.scored_offer_id = so.id
+                        AND se.sent_at >= ?
+                  )
+                ORDER BY so.final_score DESC
+                LIMIT 1
+                """,
+                (cutoff,),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            cols = [d[0] for d in cursor.description]
+            return dict(zip(cols, row))
+        except Exception as exc:
+            raise SQLiteError(str(exc), operation="get_next_unsent_offer") from exc
 
     # ------------------------------------------------------------------
     # system_logs

@@ -575,8 +575,6 @@ class StorageManager:
         rule_score: int,
         final_score: int,
         status: str,
-        ai_score: int | None = None,
-        ai_description: str | None = None,
     ) -> str:
         """
         Salva o resultado da análise em ambos os bancos.
@@ -597,8 +595,6 @@ class StorageManager:
                     rule_score,
                     final_score,
                     status,
-                    ai_score,
-                    ai_description,
                 )
             except SupabaseError as exc:
                 logger.warning("supabase_scored_offer_failed", error=str(exc))
@@ -610,8 +606,6 @@ class StorageManager:
                 rule_score,
                 final_score,
                 status,
-                ai_score,
-                ai_description,
                 offer_id=canonical_id,
             )
         except SQLiteError as exc:
@@ -635,8 +629,7 @@ class StorageManager:
         UUIDs para manter FKs consistentes entre os bancos.
 
         entries: lista de dicts com keys:
-            product_id, rule_score, final_score, status,
-            ai_score (opcional), ai_description (opcional).
+            product_id, rule_score, final_score, status.
 
         Returns:
             Lista de UUIDs dos scored_offers criados.
@@ -722,6 +715,30 @@ class StorageManager:
             except SupabaseError:
                 pass
         return await self._sqlite.was_recently_sent(ml_id, hours)
+
+    async def get_recently_sent_ids(self, hours: int = 24) -> set[str]:
+        """
+        Retorna o conjunto de ml_ids enviados nas últimas N horas (1 query batch).
+
+        Substitui N chamadas a was_recently_sent() por uma única query —
+        use este método para deduplicação em lote em vez do loop com was_recently_sent().
+        """
+        if self._using_supabase:
+            try:
+                return await self._supabase.get_recently_sent_ids(hours)
+            except SupabaseError:
+                pass
+        return await self._sqlite.get_recently_sent_ids(hours)
+
+    async def get_next_unsent_offer(self) -> dict | None:
+        """Retorna a oferta aprovada de maior score ainda não enviada (LIMIT 1)."""
+        if self._using_supabase:
+            try:
+                offers = await self._supabase.get_pending_scored_offers(limit=1)
+                return offers[0] if offers else None
+            except SupabaseError:
+                pass
+        return await self._sqlite.get_next_unsent_offer()
 
     # ------------------------------------------------------------------
     # users

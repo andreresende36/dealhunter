@@ -21,15 +21,31 @@ Redistribuicao dinamica:
 import math
 import re
 import unicodedata
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass, field, fields as dc_fields
+from enum import Enum
 
 import structlog
 
-from src.config import settings
+from src.config import settings, ScoreConfig
 from src.scraper.base_scraper import ScrapedProduct
 
 logger = structlog.get_logger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Enum de motivos de rejeição
+# ---------------------------------------------------------------------------
+
+
+class RejectReason(str, Enum):
+    """Motivos de rejeição estruturados — evita comparações frágeis com startswith."""
+
+    LOW_DISCOUNT = "desconto_baixo"
+    LOW_RATING = "avaliacao_baixa"
+    FEW_REVIEWS = "poucas_avaliacoes"
+    INVALID_PRICE = "preco_invalido"
+    SHORT_TITLE = "titulo_curto"
+    LOW_SCORE = "score_baixo"
 
 
 # ---------------------------------------------------------------------------
@@ -59,17 +75,13 @@ class ScoreBreakdown:
     installments: CriterionScore = field(default_factory=CriterionScore)
     title_quality: CriterionScore = field(default_factory=CriterionScore)
 
+    def all_criteria(self) -> list[CriterionScore]:
+        """Retorna todos os critérios em ordem — extensível via dataclasses.fields()."""
+        return [getattr(self, f.name) for f in dc_fields(self)]
+
     @property
     def total(self) -> float:
-        return (
-            self.discount.final_score
-            + self.badge.final_score
-            + self.rating.final_score
-            + self.reviews.final_score
-            + self.free_shipping.final_score
-            + self.installments.final_score
-            + self.title_quality.final_score
-        )
+        return sum(c.final_score for c in self.all_criteria())
 
 
 @dataclass
@@ -80,7 +92,7 @@ class ScoredProduct:
     score: float
     breakdown: ScoreBreakdown
     passed: bool  # True se score >= min_score
-    reject_reason: Optional[str] = None
+    reject_reason: RejectReason | None = None
     low_confidence: bool = False  # True se < 3 criterios com dados
     available_criteria: int = 7
     redistribution_factor: float = 1.0
@@ -91,16 +103,11 @@ class ScoredProduct:
             {
                 "score": self.score,
                 "score_breakdown": {
-                    "discount": self.breakdown.discount.final_score,
-                    "badge": self.breakdown.badge.final_score,
-                    "rating": self.breakdown.rating.final_score,
-                    "reviews": self.breakdown.reviews.final_score,
-                    "free_shipping": self.breakdown.free_shipping.final_score,
-                    "installments": self.breakdown.installments.final_score,
-                    "title_quality": self.breakdown.title_quality.final_score,
+                    f.name: getattr(self.breakdown, f.name).final_score
+                    for f in dc_fields(self.breakdown)
                 },
                 "passed": self.passed,
-                "reject_reason": self.reject_reason,
+                "reject_reason": self.reject_reason.value if self.reject_reason else None,
                 "low_confidence": self.low_confidence,
                 "available_criteria": self.available_criteria,
                 "redistribution_factor": self.redistribution_factor,
@@ -124,59 +131,53 @@ class ScoreEngine:
         scored = engine.evaluate(product)
         if scored.passed:
             # publicar oferta
+
+    Para testes, injete um ScoreConfig customizado:
+        engine = ScoreEngine(ScoreConfig(min_score=0, min_discount_pct=10))
     """
 
     # Marcas conhecidas populares no ML BR (lowercase)
-    _KNOWN_BRANDS: set[str] = {
-        "nike",
-        "adidas",
-        "puma",
-        "reebok",
-        "new balance",
-        "asics",
-        "samsung",
-        "apple",
-        "xiaomi",
-        "motorola",
-        "lg",
-        "sony",
-        "philips",
-        "electrolux",
-        "brastemp",
-        "consul",
-        "arno",
-        "mondial",
-        "tramontina",
-        "havaianas",
-        "reserva",
-        "hering",
-        "levis",
-        "colcci",
-        "dumond",
-        "arezzo",
-        "lupo",
-        "olympikus",
-        "mizuno",
-        "fila",
-        "vans",
-        "converse",
-        "lacoste",
-        "calvin klein",
-        "tommy hilfiger",
-        "polo ralph lauren",
-        "under armour",
-    }
+    _KNOWN_BRANDS: frozenset[str] = frozenset({
+        "nike", "adidas", "puma", "reebok", "new balance", "asics",
+        "samsung", "apple", "xiaomi", "motorola", "lg", "sony",
+        "philips", "electrolux", "brastemp", "consul", "arno", "mondial",
+        "tramontina", "havaianas", "reserva", "hering", "levis", "colcci",
+        "dumond", "arezzo", "lupo", "olympikus", "mizuno", "fila", "vans",
+        "converse", "lacoste", "calvin klein", "tommy hilfiger",
+        "polo ralph lauren", "under armour",
+    })
 
     # Proporcao do peso maximo de badge por tipo (chaves normalizadas)
     _BADGE_RATIO: dict[str, float] = {
-        "oferta relampago": 1.00,  # 100% do peso
-        "oferta do dia": 0.50,  # 50% do peso
-        "mais vendido": 0.30,  # 30% do peso
+        "oferta relampago": 1.00,   # 100% do peso
+        "oferta do dia": 0.50,      # 50% do peso
+        "mais vendido": 0.30,       # 30% do peso
         "oferta imperdivel": 0.10,  # 10% do peso
     }
 
-    def __init__(self) -> None:
-        self.cfg = settings.score
+    # Padrões de título pré-compilados (evita recompilação por produto)
+    _SPAM_PATTERNS: list[re.Pattern[str]] = [
+        re.compile(p, re.IGNORECASE) for p in [
+            r"!!!+",
+            r"\?\?\?+",
+            r"compre\s+j[aá]",
+            r"corra",
+            r"[uú]ltimas?\s+unidades?",
+            r"imperd[ií]vel",
+            r"aproveite",
+            r"\bfake\b",
+        ]
+    ]
+    _SPEC_PATTERNS: list[re.Pattern[str]] = [
+        re.compile(p, re.IGNORECASE) for p in [
+            r"\b\d+(cm|mm|ml|l|kg|g|GB|TB|Mb|W|mAh|V)\b",
+            r"\b(original|oficial|importado|novo)\b",
+            r"\b(kit|conjunto|par|pacote|cx)\b",
+        ]
+    ]
+
+    def __init__(self, cfg: ScoreConfig | None = None) -> None:
+        self.cfg = cfg or settings.score
         self._validate_weights()
 
     def _validate_weights(self) -> None:
@@ -219,7 +220,7 @@ class ScoreEngine:
         breakdown = self._compute_raw_scores(product)
 
         # 3. Aplica redistribuicao dinamica
-        available_weight, available_count, factor = self._redistribute(breakdown)
+        _available_weight, available_count, factor = self._redistribute(breakdown)
 
         # 4. Calcula totais
         score = round(breakdown.total, 1)
@@ -227,9 +228,7 @@ class ScoreEngine:
 
         # 5. Verifica score minimo
         passed = score >= self.cfg.min_score
-
-        if not passed:
-            reject_reason = f"Score {score} abaixo do minimo {self.cfg.min_score}"
+        final_reject_reason = None if passed else RejectReason.LOW_SCORE
 
         logger.debug(
             "product_scored",
@@ -239,7 +238,7 @@ class ScoreEngine:
             available_criteria=available_count,
             redistribution_factor=round(factor, 3),
             low_confidence=low_confidence,
-            reject_reason=reject_reason,
+            reject_reason=final_reject_reason.value if final_reject_reason else None,
         )
 
         return ScoredProduct(
@@ -247,7 +246,7 @@ class ScoreEngine:
             score=score,
             breakdown=breakdown,
             passed=passed,
-            reject_reason=reject_reason,
+            reject_reason=final_reject_reason,
             low_confidence=low_confidence,
             available_criteria=available_count,
             redistribution_factor=round(factor, 3),
@@ -256,8 +255,11 @@ class ScoreEngine:
     def evaluate_batch(self, products: list[ScrapedProduct]) -> list[ScoredProduct]:
         """Avalia uma lista de produtos e retorna apenas os aprovados, ordenados por score."""
         scored = [self.evaluate(p) for p in products]
-        approved = [s for s in scored if s.passed]
-        approved.sort(key=lambda s: s.score, reverse=True)
+        approved = sorted(
+            (s for s in scored if s.passed),
+            key=lambda s: s.score,
+            reverse=True,
+        )
 
         for s in scored:
             if not s.passed:
@@ -266,17 +268,9 @@ class ScoreEngine:
                     "product_rejected",
                     ml_id=s.product.ml_id,
                     score=s.score,
-                    reason=s.reject_reason,
+                    reason=s.reject_reason.value if s.reject_reason else None,
                     url=s.product.url,
-                    breakdown={
-                        "discount": b.discount.final_score,
-                        "badge": b.badge.final_score,
-                        "rating": b.rating.final_score,
-                        "reviews": b.reviews.final_score,
-                        "free_shipping": b.free_shipping.final_score,
-                        "installments": b.installments.final_score,
-                        "title": b.title_quality.final_score,
-                    },
+                    breakdown={f.name: getattr(b, f.name).final_score for f in dc_fields(b)},
                 )
 
         logger.info(
@@ -367,24 +361,13 @@ class ScoreEngine:
 
         Retorna (available_weight, available_count, factor).
         """
-        criteria = [
-            breakdown.discount,
-            breakdown.badge,
-            breakdown.rating,
-            breakdown.reviews,
-            breakdown.free_shipping,
-            breakdown.installments,
-            breakdown.title_quality,
-        ]
+        criteria = breakdown.all_criteria()
 
         available_weight = sum(c.max_points for c in criteria if c.available)
         available_count = sum(1 for c in criteria if c.available)
 
         # Evita divisao por zero (todos indisponiveis — cenario teorico)
-        if available_weight <= 0:
-            factor = 1.0
-        else:
-            factor = 100.0 / available_weight
+        factor = 100.0 / available_weight if available_weight > 0 else 1.0
 
         for criterion in criteria:
             if criterion.available:
@@ -406,12 +389,11 @@ class ScoreEngine:
         Cap em 80% de desconto. Baseline subtrai o valor em d=0 para
         garantir que _score_discount(0) = 0.
         """
-        max_pts = self.cfg.weight_discount
         if pct <= 0:
             return 0.0
 
-        # Cap em 80%
-        d = min(pct, 80.0)
+        max_pts = self.cfg.weight_discount
+        d = min(pct, 80.0)  # cap em 80%
 
         # Sigmoid centrada em 35% de desconto
         raw = max_pts / (1.0 + math.exp(-0.12 * (d - 35.0)))
@@ -430,10 +412,9 @@ class ScoreEngine:
 
     def _score_rating(self, rating: float) -> float:
         """Escala linear: <3.5 -> 0pts, 5.0 -> max pts."""
-        max_pts = self.cfg.weight_rating
         if rating < 3.5:
             return 0.0
-        return round(min((rating - 3.5) / 1.5 * max_pts, max_pts), 1)
+        return round(min((rating - 3.5) / 1.5 * self.cfg.weight_rating, self.cfg.weight_rating), 1)
 
     def _score_reviews(self, count: int) -> float:
         """
@@ -442,13 +423,12 @@ class ScoreEngine:
         Formula: min(W, log10(count) / log10(5000) * W)
         Satura em 5000 reviews.
         """
-        max_pts = self.cfg.weight_reviews
         if count <= 0:
             return 0.0
         if count >= 5000:
-            return max_pts
-        score = math.log10(count) / math.log10(5000) * max_pts
-        return round(min(score, max_pts), 1)
+            return self.cfg.weight_reviews
+        score = math.log10(count) / math.log10(5000) * self.cfg.weight_reviews
+        return round(min(score, self.cfg.weight_reviews), 1)
 
     def _score_title(self, title: str) -> float:
         """
@@ -462,12 +442,12 @@ class ScoreEngine:
           - Contem especificacoes tecnicas:      +1 pt
         Total maximo interno: 10 pts, escalado por (weight / 10)
         """
-        max_pts = self.cfg.weight_title_quality
         if not title:
             return 0.0
 
-        internal_score = 0.0
+        max_pts = self.cfg.weight_title_quality
         scale = max_pts / 10.0
+        internal_score = 0.0
 
         # 1. Comprimento adequado (+3)
         length = len(title)
@@ -481,8 +461,7 @@ class ScoreEngine:
         if any(brand in title_lower for brand in self._KNOWN_BRANDS):
             internal_score += 2.0
 
-        # 3. Nao e todo CAPS (+2)
-        # Penaliza se >50% das letras sao maiusculas
+        # 3. Nao e todo CAPS (+2) — penaliza se >50% das letras sao maiusculas
         alpha_chars = [c for c in title if c.isalpha()]
         if alpha_chars:
             upper_ratio = sum(1 for c in alpha_chars if c.isupper()) / len(alpha_chars)
@@ -490,28 +469,11 @@ class ScoreEngine:
                 internal_score += 2.0
 
         # 4. Nao contem spam/lixo (+2)
-        spam_patterns = [
-            r"!!!+",
-            r"\?\?\?+",
-            r"compre\s+j[aá]",
-            r"corra",
-            r"[uú]ltimas?\s+unidades?",
-            r"imperd[ií]vel",
-            r"aproveite",
-            r"\bfake\b",
-        ]
-        has_spam = any(re.search(p, title, re.IGNORECASE) for p in spam_patterns)
-        if not has_spam:
+        if not any(p.search(title) for p in self._SPAM_PATTERNS):
             internal_score += 2.0
 
         # 5. Contem especificacoes tecnicas (+1)
-        spec_patterns = [
-            r"\b\d+(cm|mm|ml|l|kg|g|GB|TB|Mb|W|mAh|V)\b",
-            r"\b(original|oficial|importado|novo)\b",
-            r"\b(kit|conjunto|par|pacote|cx)\b",
-        ]
-        has_specs = any(re.search(p, title, re.IGNORECASE) for p in spec_patterns)
-        if has_specs:
+        if any(p.search(title) for p in self._SPEC_PATTERNS):
             internal_score += 1.0
 
         return round(min(internal_score * scale, max_pts), 1)
@@ -520,34 +482,26 @@ class ScoreEngine:
     # Hard filters — eliminacao imediata
     # ------------------------------------------------------------------
 
-    def _hard_reject(self, product: ScrapedProduct) -> Optional[str]:
+    def _hard_reject(self, product: ScrapedProduct) -> RejectReason | None:
         """
         Criterios que eliminam um produto independente da pontuacao.
         Executado ANTES do calculo de scores para eficiencia.
-        Retorna mensagem de rejeicao ou None se passou.
+        Retorna RejectReason ou None se passou.
         """
         if product.discount_pct < self.cfg.min_discount_pct:
-            return (
-                f"Desconto {product.discount_pct:.0f}% abaixo do "
-                f"minimo {self.cfg.min_discount_pct:.0f}%"
-            )
+            return RejectReason.LOW_DISCOUNT
 
         if product.rating > 0 and product.rating < self.cfg.min_rating:
-            return (
-                f"Avaliacao {product.rating} abaixo do " f"minimo {self.cfg.min_rating}"
-            )
+            return RejectReason.LOW_RATING
 
         if product.review_count > 0 and product.review_count < self.cfg.min_reviews:
-            return (
-                f"Apenas {product.review_count} avaliacoes "
-                f"(minimo {self.cfg.min_reviews})"
-            )
+            return RejectReason.FEW_REVIEWS
 
         if product.price <= 0:
-            return "Preco invalido"
+            return RejectReason.INVALID_PRICE
 
         if len(product.title) < 10:
-            return "Titulo muito curto"
+            return RejectReason.SHORT_TITLE
 
         return None
 

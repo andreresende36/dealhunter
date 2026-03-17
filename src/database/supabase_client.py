@@ -435,8 +435,6 @@ class SupabaseClient:
         rule_score: int,
         final_score: int,
         status: str,
-        ai_score: Optional[int] = None,
-        ai_description: Optional[str] = None,
     ) -> Optional[str]:
         """
         Salva o resultado da análise de uma oferta.
@@ -444,10 +442,8 @@ class SupabaseClient:
         Args:
             product_id: UUID interno do produto
             rule_score: Pontuação calculada pelo Score Engine (0-100)
-            final_score: Pontuação final (igual a rule_score se sem IA)
+            final_score: Pontuação final
             status: "approved" | "rejected" | "pending"
-            ai_score: Pontuação da IA (0-100), None se não analisado
-            ai_description: Descrição gerada pelo Claude, None se sem IA
 
         Returns:
             UUID do scored_offer criado, ou None em caso de erro.
@@ -455,9 +451,7 @@ class SupabaseClient:
         data = {
             "product_id": product_id,
             "rule_score": rule_score,
-            "ai_score": ai_score,
             "final_score": final_score,
-            "ai_description": ai_description,
             "status": status,
             "scored_at": datetime.now(tz=timezone.utc).isoformat(),
         }
@@ -481,8 +475,7 @@ class SupabaseClient:
         Insere múltiplas scored_offers em UMA única chamada.
 
         entries: lista de dicts com keys:
-            product_id, rule_score, final_score, status,
-            ai_score (opcional), ai_description (opcional).
+            product_id, rule_score, final_score, status.
 
         Returns:
             Lista de UUIDs gerados pelo banco.
@@ -496,9 +489,7 @@ class SupabaseClient:
             deduped[e["product_id"]] = {
                 "product_id": e["product_id"],
                 "rule_score": e["rule_score"],
-                "ai_score": e.get("ai_score"),
                 "final_score": e["final_score"],
-                "ai_description": e.get("ai_description"),
                 "status": e["status"],
                 "scored_at": now,
             }
@@ -554,6 +545,27 @@ class SupabaseClient:
             return len(result.data) > 0
         except Exception as exc:
             raise SupabaseError(str(exc), operation="has_recent_sends") from exc
+
+    async def get_recently_sent_ids(self, hours: int = 24) -> set[str]:
+        """
+        Retorna o conjunto de ml_ids enviados nas últimas N horas (1 query batch).
+        Substitui N chamadas a was_recently_sent() por uma única query.
+        """
+        cutoff = (datetime.now(tz=timezone.utc) - timedelta(hours=hours)).isoformat()
+        try:
+            result = (
+                await self._db.table("sent_offers")
+                .select("scored_offers!inner(products!inner(ml_id))")
+                .gte("sent_at", cutoff)
+                .execute()
+            )
+            return {
+                row["scored_offers"]["products"]["ml_id"]
+                for row in result.data
+                if row.get("scored_offers", {}).get("products", {}).get("ml_id")
+            }
+        except Exception as exc:
+            raise SupabaseError(str(exc), operation="get_recently_sent_ids") from exc
 
     async def mark_as_sent(
         self,
