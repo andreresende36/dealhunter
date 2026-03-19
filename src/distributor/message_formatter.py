@@ -1,9 +1,10 @@
 """
-DealHunter — Message Formatter
+DealHunter — Message Formatter (Style Guide v3)
 Gera mensagens formatadas para WhatsApp e Telegram.
-Slogan: "Todo dia é Black Friday" — tom entusiasmado mas não spam.
+Template baseado na análise de 2.104 mensagens do grupo Sempre Black.
 """
 
+import re
 from dataclasses import dataclass
 from typing import Optional
 
@@ -13,14 +14,17 @@ from src.scraper.base_scraper import ScrapedProduct
 
 logger = structlog.get_logger(__name__)
 
-# Tabela de tradução pré-computada para MarkdownV2 (str.translate é ~5-10x mais rápido
-# que iterar char-a-char). Mapeia cada char reservado para '\\' + char.
+# ---------------------------------------------------------------------------
+# MarkdownV2 escaping (Telegram)
+# ---------------------------------------------------------------------------
+
 _MDV2_TRANS: dict[int, str] = {
     ord(c): f'\\{c}' for c in r'_*[]()~`>#+-=|{}.!'
 }
 
-# Para URLs: mesmos chars reservados exceto os estruturais de URL
-_MDV2_URL_UNSAFE: frozenset[str] = frozenset(r'_*[]()~`>#+-=|{}.!') - frozenset(':/?=&#@%+,;')
+_MDV2_URL_UNSAFE: frozenset[str] = (
+    frozenset(r'_*[]()~`>#+-=|{}.!') - frozenset(':/?=&#@%+,;')
+)
 _MDV2_URL_TRANS: dict[int, str] = {
     ord(c): f'\\{c}' for c in _MDV2_URL_UNSAFE
 }
@@ -32,97 +36,49 @@ def _escape_mdv2(text: str) -> str:
 
 
 def _escape_mdv2_url(url: str) -> str:
-    """Escapa URL para uso dentro de (...) em inline links do MarkdownV2.
-
-    Conforme a spec do Telegram, dentro de () apenas ')' e '\\' precisam escape.
-    Na prática, o parser também quebra com outros chars — escapamos tudo que é reservado
-    exceto ':', '/', '?' e demais estruturais de URL.
-    """
+    """Escapa URL para uso dentro de (...) em inline links do MarkdownV2."""
     return url.translate(_MDV2_URL_TRANS)
 
 
-# Emojis por faixa de desconto
-DISCOUNT_EMOJIS = {
-    80: "🔥🔥🔥",
-    60: "🔥🔥",
-    40: "🔥",
-    20: "⚡",
-    0:  "💡",
-}
+# ---------------------------------------------------------------------------
+# Marcas conhecidas para fallback de título rule-based
+# ---------------------------------------------------------------------------
 
-# Templates de mensagem
-# Nota: em MarkdownV2, chars como . - ! ( ) devem ser escapados no texto estático.
-# Dentro de [text](url), o text segue regras normais e a url só precisa escapar ) e \.
-# Template Telegram: com preço original + preço Pix
-TELEGRAM_TEMPLATE_PIX = """{discount_emoji} *{title}*
+_KNOWN_BRANDS: list[str] = [
+    "Nike", "Adidas", "Puma", "Fila", "New Balance", "Asics", "Mizuno",
+    "Under Armour", "Reebok", "Vans", "Olympikus", "Kappa",
+    "Natura", "O Boticário", "Boticário", "Avon",
+    "Growth", "Max Titanium", "Integralmedica", "Atlhetica",
+    "Samsung", "Xiaomi", "JBL", "Apple",
+    "Tramontina", "Mondial", "Electrolux",
+    "Insider", "Hering", "Renner",
+]
 
-💰 De ~~R$ {original_price}~~ por *R$ {pix_price}* no Pix
-💳 ou *R$ {price}* em até {installments_line}
-📉 *{discount_pct}% OFF*{free_shipping_line}
+_BRAND_PATTERN = re.compile(
+    r'\b(' + '|'.join(re.escape(b) for b in _KNOWN_BRANDS) + r')\b',
+    re.IGNORECASE,
+)
 
-{description}
 
-{hashtags}
+def _extract_brand(title: str) -> str | None:
+    """Extrai marca conhecida do título do produto."""
+    match = _BRAND_PATTERN.search(title)
+    return match.group(0).upper() if match else None
 
-🛒 [Comprar agora\\!]({link})
-━━━━━━━━━━━━━━━
-_Sempre Black — Todo dia é Black Friday_ 🖤"""
 
-# Template Telegram: com preço original, sem Pix
-TELEGRAM_TEMPLATE = """{discount_emoji} *{title}*
+def _fallback_catchy_title(product_title: str) -> str:
+    """Gera título catchy rule-based quando IA não está disponível."""
+    brand = _extract_brand(product_title)
+    if brand:
+        title = f"{brand} COM PREÇÃO"
+    else:
+        title = "OFERTA IMPERDÍVEL"
+    return title[:35]
 
-💰 De ~~R$ {original_price}~~ por *R$ {price}*
-📉 *{discount_pct}% OFF*{free_shipping_line}
 
-{description}
-
-{hashtags}
-
-🛒 [Comprar agora\\!]({link})
-━━━━━━━━━━━━━━━
-_Sempre Black — Todo dia é Black Friday_ 🖤"""
-
-# Template WhatsApp: com preço original + preço Pix
-WHATSAPP_TEMPLATE_PIX = """{discount_emoji} *{title}*
-
-💰 De R$ {original_price} por *R$ {pix_price}* no Pix
-💳 ou *R$ {price}* em até {installments_line}
-📉 *{discount_pct:.0f}% OFF*{free_shipping_line}
-
-{description}
-
-{hashtags}
-
-🛒 {link}
-
-_Sempre Black — Todo dia é Black Friday_ 🖤"""
-
-# Template WhatsApp: com preço original, sem Pix
-WHATSAPP_TEMPLATE = """{discount_emoji} *{title}*
-
-💰 De R$ {original_price} por *R$ {price}*
-📉 *{discount_pct:.0f}% OFF*{free_shipping_line}
-
-{description}
-
-{hashtags}
-
-🛒 {link}
-
-_Sempre Black — Todo dia é Black Friday_ 🖤"""
-
-# Template Telegram: sem preço original
-TELEGRAM_TEMPLATE_NO_ORIGINAL = """{discount_emoji} *{title}*
-
-💰 *R$ {price}*{free_shipping_line}
-
-{description}
-
-{hashtags}
-
-🛒 [Comprar agora\\!]({link})
-━━━━━━━━━━━━━━━
-_Sempre Black — Todo dia é Black Friday_ 🖤"""
+# ---------------------------------------------------------------------------
+# Dataclass de saída
+# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -135,9 +91,23 @@ class FormattedMessage:
     product_ml_id: str
 
 
+# ---------------------------------------------------------------------------
+# Formatter principal
+# ---------------------------------------------------------------------------
+
+
 class MessageFormatter:
     """
-    Formata ofertas para publicação nos grupos.
+    Formata ofertas para publicação nos grupos Sempre Black.
+
+    Template segue o Style Guide v3:
+    - Título catchy em CAPS LOCK (gancho, não nome do produto)
+    - Nome completo do produto
+    - 📉 XX% OFF + bloco de preço com 🤘🏻
+    - ✅ Frete Grátis (condicional)
+    - ⭐ Avaliação (condicional: rating >= 4.0 e reviews >= 50)
+    - 🛒 CTA + link
+    - Rodapé fixo "Sempre Black"
 
     Uso:
         formatter = MessageFormatter()
@@ -148,117 +118,65 @@ class MessageFormatter:
         self,
         product: ScrapedProduct,
         short_link: str,
-        custom_title: Optional[str] = None,
-        custom_description: Optional[str] = None,
-        hashtags: Optional[list[str]] = None,
+        catchy_title: Optional[str] = None,
         enhanced_image_url: Optional[str] = None,
     ) -> FormattedMessage:
         """Gera mensagem formatada para Telegram e WhatsApp."""
 
-        title = custom_title or self._truncate(product.title, 60)
-        description = custom_description or self._generate_description(product)
-        tags = self._build_hashtags(product, hashtags)
-        discount_emoji = self._get_discount_emoji(product.discount_pct)
-        free_shipping_line = "\n✅ *Frete Grátis*" if product.free_shipping else ""
+        # Título catchy (IA ou fallback)
+        title = catchy_title or _fallback_catchy_title(product.title)
+        title = title.upper()
+
+        # Nome completo do produto (sem truncar)
+        product_name = product.title
+
+        # Preço final (pix tem prioridade)
+        final_price = product.pix_price or product.price
+        original_price = product.original_price or product.price
+
+        # Desconto calculado
+        if original_price > 0 and final_price < original_price:
+            discount_pct = round((1 - final_price / original_price) * 100)
+        else:
+            discount_pct = round(product.discount_pct)
+
+        # Sufixo de pagamento
+        payment_suffix = self._build_payment_suffix(product)
+
+        # Linhas condicionais
+        free_shipping_line = "✅ Frete Grátis\n" if product.free_shipping else ""
+        rating_line = self._build_rating_line(product)
 
         # Formata preços
-        price_str = self._format_price(product.price)
-        original_str = (
-            self._format_price(product.original_price)
-            if product.original_price
-            else None
+        final_price_str = self._format_price(final_price)
+        original_price_str = self._format_price(original_price)
+
+        # --- WhatsApp (plain text com bold *...* ) ---
+        whatsapp_text = self._build_whatsapp(
+            title=title,
+            product_name=product_name,
+            discount_pct=discount_pct,
+            original_price_str=original_price_str,
+            final_price_str=final_price_str,
+            payment_suffix=payment_suffix,
+            free_shipping_line=free_shipping_line,
+            rating_line=rating_line,
+            link=short_link,
         )
-        pix_str = (
-            self._format_price(product.pix_price)
-            if product.pix_price
-            else None
+
+        # --- Telegram (MarkdownV2) ---
+        telegram_text = self._build_telegram(
+            title=title,
+            product_name=product_name,
+            discount_pct=discount_pct,
+            original_price_str=original_price_str,
+            final_price_str=final_price_str,
+            payment_suffix=payment_suffix,
+            free_shipping_line=free_shipping_line,
+            rating_line=rating_line,
+            link=short_link,
         )
-        has_pix = pix_str is not None and original_str is not None
 
-        # Linha de parcelamento (para template Pix)
-        installments_line = self._build_installments_line(product)
-
-        # Telegram — escapa conteúdo dinâmico para MarkdownV2
-        esc_title = _escape_mdv2(title)
-        esc_price = _escape_mdv2(price_str)
-        esc_original = _escape_mdv2(original_str) if original_str else None
-        esc_pix = _escape_mdv2(pix_str) if pix_str else None
-        esc_discount = _escape_mdv2(f"{product.discount_pct:.0f}")
-        esc_desc = _escape_mdv2(description)
-        esc_tags = _escape_mdv2(tags)
-        esc_shipping = (
-            "\n✅ *Frete Grátis*" if product.free_shipping else ""
-        )
-        esc_link = _escape_mdv2_url(short_link)
-        esc_installments = _escape_mdv2(installments_line)
-
-        if has_pix:
-            # Template com Pix + cartão
-            telegram_text = TELEGRAM_TEMPLATE_PIX.format(
-                discount_emoji=discount_emoji,
-                title=esc_title,
-                original_price=esc_original,
-                pix_price=esc_pix,
-                price=esc_price,
-                installments_line=esc_installments,
-                discount_pct=esc_discount,
-                free_shipping_line=esc_shipping,
-                description=esc_desc,
-                hashtags=esc_tags,
-                link=esc_link,
-            )
-        elif esc_original:
-            telegram_text = TELEGRAM_TEMPLATE.format(
-                discount_emoji=discount_emoji,
-                title=esc_title,
-                original_price=esc_original,
-                price=esc_price,
-                discount_pct=esc_discount,
-                free_shipping_line=esc_shipping,
-                description=esc_desc,
-                hashtags=esc_tags,
-                link=esc_link,
-            )
-        else:
-            telegram_text = TELEGRAM_TEMPLATE_NO_ORIGINAL.format(
-                discount_emoji=discount_emoji,
-                title=esc_title,
-                price=esc_price,
-                free_shipping_line=esc_shipping,
-                description=esc_desc,
-                hashtags=esc_tags,
-                link=esc_link,
-            )
-
-        # WhatsApp (sem markdown de link inline, sem tachado com ~~)
-        if has_pix:
-            whatsapp_text = WHATSAPP_TEMPLATE_PIX.format(
-                discount_emoji=discount_emoji,
-                title=title,
-                original_price=original_str,
-                pix_price=pix_str,
-                price=price_str,
-                installments_line=installments_line,
-                discount_pct=product.discount_pct,
-                free_shipping_line=free_shipping_line,
-                description=description,
-                hashtags=tags,
-                link=short_link,
-            )
-        else:
-            whatsapp_text = WHATSAPP_TEMPLATE.format(
-                discount_emoji=discount_emoji,
-                title=title,
-                original_price=original_str or price_str,
-                price=price_str,
-                discount_pct=product.discount_pct,
-                free_shipping_line=free_shipping_line,
-                description=description,
-                hashtags=tags,
-                link=short_link,
-            )
-
-        # Usa imagem aprimorada se disponível, senão a thumbnail original
         image_url = enhanced_image_url or product.image_url or None
 
         return FormattedMessage(
@@ -270,57 +188,121 @@ class MessageFormatter:
         )
 
     # ------------------------------------------------------------------
+    # Builders
+    # ------------------------------------------------------------------
+
+    def _build_whatsapp(
+        self,
+        title: str,
+        product_name: str,
+        discount_pct: int,
+        original_price_str: str,
+        final_price_str: str,
+        payment_suffix: str,
+        free_shipping_line: str,
+        rating_line: str,
+        link: str,
+    ) -> str:
+        """Monta mensagem WhatsApp (plain text com bold *...*)."""
+        lines = [
+            f"*{title}*",
+            "",
+            product_name,
+            "",
+            f"📉 {discount_pct}% OFF",
+            f"de R${original_price_str} *por R$ {final_price_str}{payment_suffix}* 🤘🏻",
+        ]
+
+        # Bloco condicional (frete + avaliação)
+        conditional = ""
+        if free_shipping_line or rating_line:
+            conditional = f"\n{free_shipping_line}{rating_line}"
+        lines.append(conditional)
+
+        lines.extend([
+            f"🛒 Comprar agora! {link}",
+            "",
+            "━━━━━━━━━━━━━━━",
+            "Sempre Black — Aqui todo dia é Black Friday 🖤",
+        ])
+
+        return "\n".join(lines)
+
+    def _build_telegram(
+        self,
+        title: str,
+        product_name: str,
+        discount_pct: int,
+        original_price_str: str,
+        final_price_str: str,
+        payment_suffix: str,
+        free_shipping_line: str,
+        rating_line: str,
+        link: str,
+    ) -> str:
+        """Monta mensagem Telegram (MarkdownV2)."""
+        esc_title = _escape_mdv2(title)
+        esc_name = _escape_mdv2(product_name)
+        esc_discount = _escape_mdv2(str(discount_pct))
+        esc_original = _escape_mdv2(original_price_str)
+        esc_final = _escape_mdv2(final_price_str)
+        esc_suffix = _escape_mdv2(payment_suffix)
+        esc_link = _escape_mdv2_url(link)
+
+        # Frete e avaliação já vêm como texto puro — escapar
+        esc_shipping = (
+            _escape_mdv2("✅ Frete Grátis") + "\n"
+            if free_shipping_line else ""
+        )
+        esc_rating = _escape_mdv2(rating_line) if rating_line else ""
+
+        lines = [
+            f"*{esc_title}*",
+            "",
+            esc_name,
+            "",
+            f"📉 {esc_discount}% OFF",
+            f"de R$ {esc_original} *por R$ {esc_final}{esc_suffix}* 🤘🏻",
+        ]
+
+        conditional = ""
+        if esc_shipping or esc_rating:
+            conditional = f"\n{esc_shipping}{esc_rating}"
+        lines.append(conditional)
+
+        lines.extend([
+            f"🛒 [Comprar agora\\!]({esc_link})",
+            "",
+            "━━━━━━━━━━━━━━━",
+            "_Sempre Black — Aqui todo dia é Black Friday_ 🖤",
+        ])
+
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
-    def _build_installments_line(self, product: ScrapedProduct) -> str:
-        """Gera texto de parcelamento para o template Pix.
-
-        Ex: '5x R$ 14,99 sem juros' ou '10x sem juros'.
-        Fallback genérico se não tiver dados de parcela.
-        """
+    def _build_payment_suffix(self, product: ScrapedProduct) -> str:
+        """Retorna sufixo de pagamento: ' no pix', ' em Nx', ou vazio."""
+        if product.pix_price and product.pix_price < product.price:
+            return " no pix"
         if product.installments_without_interest:
-            return "10x sem juros"
-        return "12x no cartão"
+            return " em 10x"
+        return ""
+
+    def _build_rating_line(self, product: ScrapedProduct) -> str:
+        """Retorna linha de avaliação se rating >= 4.0 e reviews >= 50."""
+        if product.rating >= 4.0 and product.review_count >= 50:
+            count_fmt = f"{product.review_count:,}".replace(",", ".")
+            return f"⭐ {product.rating}/5 ({count_fmt} avaliações)\n"
+        return ""
 
     def _format_price(self, value: float) -> str:
         """Formata número para preço brasileiro. Ex: 1299.9 → '1.299,90'"""
-        return f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
-    def _get_discount_emoji(self, pct: float) -> str:
-        for threshold in sorted(DISCOUNT_EMOJIS.keys(), reverse=True):
-            if pct >= threshold:
-                return DISCOUNT_EMOJIS[threshold]
-        return "💡"
-
-    def _truncate(self, text: str, max_len: int) -> str:
-        if len(text) <= max_len:
-            return text
-        return text[:max_len - 3] + "..."
-
-    def _generate_description(self, product: ScrapedProduct) -> str:
-        """Gera descrição automática baseada nos atributos do produto."""
-        parts = []
-
-        if product.rating >= 4.5:
-            parts.append(f"⭐ {product.rating}/5 ({product.review_count} avaliações)")
-        elif product.rating >= 4.0:
-            parts.append(f"⭐ Bem avaliado: {product.rating}/5")
-
-        return " · ".join(parts) if parts else "Oferta selecionada pelo DealHunter"
-
-    def _build_hashtags(
-        self, product: ScrapedProduct, custom: Optional[list[str]] = None
-    ) -> str:
-        """Constrói linha de hashtags."""
-        base_tags = ["#SempreBlack", "#BlackFriday", "#Oferta"]
-
-        if product.category:
-            category_tag = "#" + product.category.replace(" ", "").replace("&", "e")
-            base_tags.append(category_tag)
-
-        if product.free_shipping:
-            base_tags.append("#FreteGrátis")
-
-        tags = custom if custom else base_tags
-        return " ".join(tags[:6])  # Máx 6 hashtags
+        return (
+            f"{value:,.2f}"
+            .replace(",", "X")
+            .replace(".", ",")
+            .replace("X", ".")
+        )

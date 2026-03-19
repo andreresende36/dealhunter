@@ -1,8 +1,18 @@
 """
-DealHunter — Runner
+DealHunter — Runner (Style Guide v3)
 Processo long-running com 2 coroutines:
   - scraper_loop: roda o pipeline de scraping a cada 1h (24/7)
-  - sender_loop: envia ofertas da fila a cada 3-6 min (8h-23h BRT)
+  - sender_loop: envia ofertas da fila com distribuição temporal (8h-23h BRT)
+
+Distribuição por janela de horário (style guide v3):
+  08h-10h: 28% do volume (~36 ofertas)
+  10h-13h: 14% (~18 ofertas)
+  13h-16h: 30% (~39 ofertas)
+  16h-18h: 13% (~17 ofertas)
+  18h-23h: 15% (~20 ofertas)
+
+Multiplicadores por dia da semana:
+  Sexta: +20%  |  Terça: -15%  |  Demais: normal
 """
 
 import asyncio
@@ -25,6 +35,83 @@ import uvicorn
 
 setup_logging()
 logger = structlog.get_logger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Distribuição temporal (Style Guide v3)
+# ---------------------------------------------------------------------------
+
+# Peso de cada janela de horário (proporção do volume diário)
+TIME_WINDOWS: list[tuple[int, int, float]] = [
+    (8, 10, 0.28),    # 28% do volume
+    (10, 13, 0.14),   # 14%
+    (13, 16, 0.30),   # 30%
+    (16, 18, 0.13),   # 13%
+    (18, 23, 0.15),   # 15%
+]
+
+# Multiplicadores por dia da semana (0=Monday ... 6=Sunday)
+DAY_MULTIPLIERS: dict[int, float] = {
+    0: 1.0,     # Segunda
+    1: 0.85,    # Terça (-15%)
+    2: 1.0,     # Quarta
+    3: 1.0,     # Quinta
+    4: 1.20,    # Sexta (+20%)
+    5: 1.0,     # Sábado
+    6: 1.0,     # Domingo
+}
+
+
+def _get_window_weight(hour: int) -> float:
+    """Retorna o peso da janela de horário atual."""
+    for start, end, weight in TIME_WINDOWS:
+        if start <= hour < end:
+            return weight
+    return 0.14  # Fallback para janelas não mapeadas
+
+
+def calculate_send_interval() -> int:
+    """
+    Calcula intervalo de envio em minutos baseado na janela de horário
+    e dia da semana.
+
+    Janelas de pico (peso alto) → intervalos menores.
+    Janelas fracas (peso baixo) → intervalos maiores.
+    """
+    tz = ZoneInfo(settings.sender.timezone)
+    now = datetime.now(tz)
+
+    base_min = settings.sender.min_interval
+    base_max = settings.sender.max_interval
+    base_avg = (base_min + base_max) / 2
+
+    # Peso da janela atual (0.13 a 0.30)
+    window_weight = _get_window_weight(now.hour)
+
+    # Peso médio para normalização (todos os pesos / número de janelas)
+    avg_weight = sum(w for _, _, w in TIME_WINDOWS) / len(TIME_WINDOWS)
+
+    # Fator de ajuste: inversamente proporcional ao peso
+    # Janela com peso alto → fator < 1 → intervalo menor
+    # Janela com peso baixo → fator > 1 → intervalo maior
+    factor = avg_weight / window_weight if window_weight > 0 else 1.0
+
+    # Multiplicador do dia da semana
+    day_mult = DAY_MULTIPLIERS.get(now.weekday(), 1.0)
+    # Dia com mais volume → intervalo menor (inversamente proporcional)
+    factor /= day_mult
+
+    # Calcula intervalo ajustado
+    adjusted_avg = base_avg * factor
+
+    # Adiciona variação aleatória (±30%)
+    jitter = random.uniform(0.7, 1.3)
+    interval = adjusted_avg * jitter
+
+    # Clamp entre limites razoáveis
+    interval = max(base_min, min(interval, base_max * 2))
+
+    return round(interval)
 
 
 async def _interruptible_sleep(seconds: float, shutdown: asyncio.Event) -> None:
@@ -75,9 +162,7 @@ async def sender_loop(
     shutdown: asyncio.Event,
     alert_bot: AlertBot,
 ) -> None:
-    """Envia ofertas da fila com intervalo aleatório, só em horário comercial."""
-    min_interval = settings.sender.min_interval
-    max_interval = settings.sender.max_interval
+    """Envia ofertas da fila com distribuição temporal do Style Guide v3."""
 
     while not shutdown.is_set():
         is_sending = is_sending_hours()
@@ -90,7 +175,6 @@ async def sender_loop(
                 current_hour=now.hour,
                 window=f"{settings.sender.start_hour}h-{settings.sender.end_hour}h",
             )
-            # Verifica a cada 60s se entrou no horário
             MonitorState.next_send_time = datetime.now() + timedelta(seconds=60)
             await _interruptible_sleep(60, shutdown)
             continue
@@ -106,9 +190,18 @@ async def sender_loop(
             except Exception:
                 pass
 
-        # Intervalo aleatório entre envios
-        delay_minutes = random.randint(min_interval, max_interval)
-        logger.debug("sender_next_in", minutes=delay_minutes)
+        # Intervalo ajustado por janela de horário e dia da semana
+        delay_minutes = calculate_send_interval()
+        tz = ZoneInfo(settings.sender.timezone)
+        now = datetime.now(tz)
+        window_weight = _get_window_weight(now.hour)
+        logger.debug(
+            "sender_next_in",
+            minutes=delay_minutes,
+            hour=now.hour,
+            window_weight=window_weight,
+            day=now.strftime("%A"),
+        )
         MonitorState.next_send_time = datetime.now() + timedelta(minutes=delay_minutes)
         await _interruptible_sleep(delay_minutes * 60, shutdown)
 

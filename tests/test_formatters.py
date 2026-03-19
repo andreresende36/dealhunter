@@ -1,5 +1,6 @@
 """
 Testes para o Message Formatter e Affiliate Links.
+Atualizado para Style Guide v3.
 """
 
 import pytest
@@ -37,7 +38,7 @@ def sample_product() -> ScrapedProduct:
 
 
 # ---------------------------------------------------------------------------
-# MessageFormatter
+# MessageFormatter (Style Guide v3)
 # ---------------------------------------------------------------------------
 
 
@@ -48,67 +49,116 @@ class TestMessageFormatter:
         assert msg.whatsapp_text
         assert msg.product_ml_id == "MLB123456789"
 
-    def test_telegram_contains_price(self, formatter, sample_product):
+    def test_contains_prices(self, formatter, sample_product):
         msg = formatter.format(sample_product, short_link="https://s.black/abc")
-        assert "299" in msg.telegram_text
-        assert "599" in msg.telegram_text
+        assert "299" in msg.whatsapp_text
+        assert "599" in msg.whatsapp_text
 
-    def test_telegram_contains_discount(self, formatter, sample_product):
+    def test_contains_discount_pct(self, formatter, sample_product):
         msg = formatter.format(sample_product, short_link="https://s.black/abc")
-        assert "50%" in msg.telegram_text
+        assert "📉" in msg.whatsapp_text
+        assert "% OFF" in msg.whatsapp_text
 
-    def test_telegram_contains_free_shipping(self, formatter, sample_product):
+    def test_contains_rock_on_emoji(self, formatter, sample_product):
         msg = formatter.format(sample_product, short_link="https://s.black/abc")
-        assert "Frete" in msg.telegram_text or "grátis" in msg.telegram_text.lower()
+        assert "🤘🏻" in msg.whatsapp_text
+
+    def test_contains_free_shipping(self, formatter, sample_product):
+        msg = formatter.format(sample_product, short_link="https://s.black/abc")
+        assert "✅ Frete Grátis" in msg.whatsapp_text
 
     def test_no_free_shipping_not_shown(self, formatter, sample_product):
         sample_product.free_shipping = False
         msg = formatter.format(sample_product, short_link="https://s.black/abc")
-        assert "Frete Grátis" not in msg.telegram_text
+        assert "Frete Grátis" not in msg.whatsapp_text
+
+    def test_rating_shown_when_good(self, formatter, sample_product):
+        msg = formatter.format(sample_product, short_link="https://s.black/abc")
+        assert "⭐ 4.8/5" in msg.whatsapp_text
+        assert "avaliações" in msg.whatsapp_text
+
+    def test_rating_hidden_when_low(self, formatter, sample_product):
+        sample_product.rating = 3.5
+        sample_product.review_count = 20
+        msg = formatter.format(sample_product, short_link="https://s.black/abc")
+        assert "⭐" not in msg.whatsapp_text
+
+    def test_rating_hidden_when_few_reviews(self, formatter, sample_product):
+        sample_product.rating = 4.5
+        sample_product.review_count = 30
+        msg = formatter.format(sample_product, short_link="https://s.black/abc")
+        assert "⭐" not in msg.whatsapp_text
 
     def test_whatsapp_has_no_inline_link_markdown(self, formatter, sample_product):
         msg = formatter.format(sample_product, short_link="https://s.black/abc")
-        # WhatsApp não suporta [texto](link) — deve ter a URL direta
-        assert "[Comprar agora]" not in msg.whatsapp_text
+        assert "[Comprar agora" not in msg.whatsapp_text
         assert "https://s.black/abc" in msg.whatsapp_text
+
+    def test_telegram_has_inline_link(self, formatter, sample_product):
+        msg = formatter.format(
+            sample_product, short_link="https://s.black/abc"
+        )
+        assert "[Comprar agora\\!]" in msg.telegram_text
+
+    def test_footer_present(self, formatter, sample_product):
+        msg = formatter.format(sample_product, short_link="https://s.black/abc")
+        assert "━━━" in msg.whatsapp_text
+        assert "Sempre Black" in msg.whatsapp_text
+        assert "Aqui todo dia é Black Friday" in msg.whatsapp_text
+        assert "🖤" in msg.whatsapp_text
+
+    def test_no_hashtags(self, formatter, sample_product):
+        msg = formatter.format(sample_product, short_link="https://s.black/abc")
+        assert "#" not in msg.whatsapp_text
+
+    def test_no_fire_emoji(self, formatter, sample_product):
+        msg = formatter.format(sample_product, short_link="https://s.black/abc")
+        assert "🔥" not in msg.whatsapp_text
+
+    def test_catchy_title_used(self, formatter, sample_product):
+        msg = formatter.format(
+            sample_product,
+            short_link="https://s.black/abc",
+            catchy_title="NIKE CLÁSSICO COM PREÇÃO",
+        )
+        assert "*NIKE CLÁSSICO COM PREÇÃO*" in msg.whatsapp_text
+
+    def test_catchy_title_fallback(self, formatter, sample_product):
+        msg = formatter.format(sample_product, short_link="https://s.black/abc")
+        first_line = msg.whatsapp_text.split("\n")[0]
+        assert first_line.startswith("*")
+        assert first_line.endswith("*")
+        title = first_line.strip("*")
+        assert title == title.upper()
+
+    def test_product_name_full(self, formatter, sample_product):
+        msg = formatter.format(sample_product, short_link="https://s.black/abc")
+        assert sample_product.title in msg.whatsapp_text
+
+    def test_pix_suffix(self, formatter, sample_product):
+        sample_product.pix_price = 249.90
+        msg = formatter.format(sample_product, short_link="https://s.black/abc")
+        assert "no pix" in msg.whatsapp_text
+
+    def test_no_pix_no_suffix(self, formatter, sample_product):
+        sample_product.pix_price = None
+        sample_product.installments_without_interest = False
+        msg = formatter.format(sample_product, short_link="https://s.black/abc")
+        assert "no pix" not in msg.whatsapp_text
 
     def test_format_price_br_style(self, formatter):
         assert formatter._format_price(1299.90) == "1.299,90"
         assert formatter._format_price(99.0) == "99,00"
 
-    def test_discount_emoji_high_discount(self, formatter):
-        assert "🔥🔥🔥" == formatter._get_discount_emoji(85)
-
-    def test_discount_emoji_medium(self, formatter):
-        emoji = formatter._get_discount_emoji(35)
-        assert emoji in ["⚡", "🔥"]
-
-    def test_truncate(self, formatter):
-        long_title = "A" * 70
-        assert len(formatter._truncate(long_title, 60)) <= 60
-        assert formatter._truncate("curto", 60) == "curto"
-
-    def test_hashtags_include_sempreblack(self, formatter, sample_product):
+    def test_cta_present(self, formatter, sample_product):
         msg = formatter.format(sample_product, short_link="https://s.black/abc")
-        assert (
-            "#SempreBlack" in msg.telegram_text or "#SempreBlack" in msg.whatsapp_text
-        )
-
-    def test_custom_title_used(self, formatter, sample_product):
-        custom = "Oferta Incrível de Tênis"
-        msg = formatter.format(
-            sample_product,
-            short_link="https://s.black/abc",
-            custom_title=custom,
-        )
-        assert custom in msg.telegram_text
+        assert "🛒 Comprar agora!" in msg.whatsapp_text
 
     def test_product_without_original_price(self, formatter, sample_product):
         sample_product.original_price = None
         sample_product.discount_pct = 0.0
-        # Não deve lançar exceção
         msg = formatter.format(sample_product, short_link="https://s.black/abc")
-        assert msg.telegram_text
+        assert msg.whatsapp_text
 
 
 # ---------------------------------------------------------------------------

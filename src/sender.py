@@ -1,15 +1,16 @@
 """
-DealHunter — Sender
+DealHunter — Sender (Style Guide v3)
 Envia a próxima oferta da fila de prioridade (maior score primeiro).
 
 Fluxo:
   1. Consulta próxima oferta não enviada (view vw_approved_unsent)
-  2. Gera imagem lifestyle via IA (Haiku + Gemini)
-  3. Upload da imagem para Supabase Storage
-  4. Obtém/cria link de afiliado
-  5. Formata mensagem com imagem lifestyle
-  6. Publica via Telegram
-  7. Marca como enviada
+  2. Gera título catchy via IA (Haiku)
+  3. Seleciona melhor imagem real do produto (3 camadas)
+  4. Upload da imagem para Supabase Storage
+  5. Obtém/cria link de afiliado
+  6. Formata mensagem com template Style Guide v3
+  7. Publica via Telegram
+  8. Marca como enviada
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from src.scraper.base_scraper import ScrapedProduct
 from src.distributor.affiliate_links import AffiliateLinkBuilder
 from src.distributor.message_formatter import MessageFormatter
 from src.distributor.telegram_bot import TelegramBot
-from src.image.lifestyle_generator import generate_lifestyle_image
+from src.image.product_image_selector import select_best_image
 from src.image.image_storage import upload_to_supabase
 
 if TYPE_CHECKING:
@@ -81,54 +82,85 @@ def _offer_to_product(offer: UnsentOfferRow) -> ScrapedProduct:
         category=offer.get("category") or "",
         image_url=offer.get("thumbnail_url") or "",
         free_shipping=bool(offer.get("free_shipping", False)),
-        installments_without_interest=bool(offer.get("installments_without_interest", False)),
+        installments_without_interest=bool(
+            offer.get("installments_without_interest", False)
+        ),
         badge=offer.get("badge") or "",
     )
 
 
-async def _generate_and_upload_image(
+async def _select_and_upload_image(
     storage: StorageManager,
     product_id: str,
-    thumbnail_url: str,
     ml_id: str,
+    product_title: str,
+    thumbnail_url: str,
+    category: str,
 ) -> str | None:
     """
-    Gera imagem lifestyle e faz upload para Supabase Storage.
-    Reutiliza imagem existente se já houver uma gerada para este produto.
-    Retorna a URL pública da imagem ou None se todas as tentativas falharem.
+    Seleciona a melhor imagem real do produto e faz upload para Supabase Storage.
+    Reutiliza imagem existente se já houver uma selecionada para este produto.
+    Retorna a URL pública da imagem ou None.
     """
-    # Reutiliza imagem já gerada — evita custo de API duplicado
+    # Reutiliza imagem já processada — evita custo duplicado
     existing_url = await storage.get_enhanced_image_url(product_id)
     if existing_url:
-        logger.info("lifestyle_reusing_existing", ml_id=ml_id, url=existing_url[:80])
+        logger.info("image_reusing_existing", ml_id=ml_id, url=existing_url[:80])
         return existing_url
 
-    max_retries = settings.sender.image_max_retries
+    image_method = settings.sender.image_method
+    image_bytes: bytes | None = None
+    source = "unknown"
 
-    for attempt in range(1, max_retries + 1):
-        logger.info(
-            "lifestyle_generating",
-            ml_id=ml_id,
-            attempt=attempt,
-            max_retries=max_retries,
-        )
+    if image_method == "lifestyle":
+        # Geração de imagem lifestyle via IA (Haiku + modelo de imagem)
+        from src.image.lifestyle_generator import generate_lifestyle_image
 
-        image_bytes = await generate_lifestyle_image(thumbnail_url)
-        if image_bytes is None:
-            logger.warning("lifestyle_attempt_failed", ml_id=ml_id, attempt=attempt)
-            continue
-
-        public_url = await upload_to_supabase(product_id, image_bytes, "jpg")
-        if public_url:
-            await storage.update_image_status(
-                product_id, "enhanced", enhanced_url=public_url
+        max_retries = settings.sender.image_max_retries
+        for attempt in range(1, max_retries + 1):
+            image_bytes = await generate_lifestyle_image(thumbnail_url)
+            if image_bytes:
+                source = "lifestyle"
+                break
+            logger.warning(
+                "lifestyle_retry",
+                ml_id=ml_id,
+                attempt=attempt,
+                max_retries=max_retries,
             )
-            logger.info("lifestyle_uploaded", ml_id=ml_id, url=public_url[:80])
-            return public_url
+    else:
+        # Pipeline de 3 camadas: marca → ML API → thumbnail
+        result = await select_best_image(
+            ml_id=ml_id,
+            product_title=product_title,
+            thumbnail_url=thumbnail_url,
+            category=category,
+        )
+        image_bytes = result.image_bytes
+        source = result.source
 
-        logger.warning("lifestyle_upload_failed", ml_id=ml_id, attempt=attempt)
+    if not image_bytes:
+        logger.warning("image_selection_no_bytes", ml_id=ml_id, source=source)
+        if image_method != "lifestyle":
+            return result.url if result.url else None  # type: ignore[possibly-undefined]
+        return None
 
-    logger.error("lifestyle_permanently_failed", ml_id=ml_id, retries=max_retries)
+    # Upload para Supabase Storage
+    public_url = await upload_to_supabase(product_id, image_bytes, "jpg")
+    if public_url:
+        await storage.update_image_status(
+            product_id, "enhanced", enhanced_url=public_url
+        )
+        logger.info(
+            "image_uploaded",
+            ml_id=ml_id,
+            source=source,
+            method=image_method,
+            url=public_url[:80],
+        )
+        return public_url
+
+    logger.warning("image_upload_failed", ml_id=ml_id)
     return None
 
 
@@ -162,25 +194,44 @@ async def send_next_offer(
     scored_offer_id = offer["scored_offer_id"]
     thumbnail_url = offer.get("thumbnail_url") or ""
     ml_id = offer["ml_id"]
+    product_title = offer["title"]
+    category = offer.get("category") or ""
 
     logger.info(
         "sending_offer",
         ml_id=ml_id,
-        title=offer["title"][:50],
+        title=product_title[:50],
         score=offer["final_score"],
     )
 
-    # 1. Gerar imagem lifestyle via IA
+    # 1. Gerar título catchy via IA (se disponível)
+    catchy_title: str | None = None
+    if settings.openrouter.api_key:
+        try:
+            from src.distributor.title_generator import generate_catchy_title
+            catchy_title = await generate_catchy_title(
+                product_title=product_title,
+                category=category,
+                price=float(offer["current_price"]),
+                original_price=(
+                    float(offer["original_price"])
+                    if offer.get("original_price") else None
+                ),
+            )
+        except Exception as exc:
+            logger.warning("title_generation_failed", ml_id=ml_id, error=str(exc))
+
+    # 2. Selecionar melhor imagem real do produto
     enhanced_image_url: str | None = None
-    if thumbnail_url and settings.openrouter.api_key:
-        enhanced_image_url = await _generate_and_upload_image(
-            storage, product_id, thumbnail_url, ml_id
+    if thumbnail_url:
+        enhanced_image_url = await _select_and_upload_image(
+            storage, product_id, ml_id, product_title, thumbnail_url, category
         )
 
     if not enhanced_image_url:
         logger.info("sending_with_original_thumbnail", ml_id=ml_id)
 
-    # 2. Link de afiliado
+    # 3. Link de afiliado
     short_url = offer["product_url"]
     try:
         ml_cfg = settings.mercado_livre
@@ -192,21 +243,34 @@ async def send_next_offer(
         )
         if user_id:
             aff_builder = AffiliateLinkBuilder(storage, user_id=user_id)
-            aff_url = await aff_builder.get_or_create(offer["product_url"], product_id)
+            aff_url = await aff_builder.get_or_create(
+                offer["product_url"], product_id
+            )
             short_url = aff_url or offer["product_url"]
     except Exception as exc:
         logger.warning("affiliate_link_failed", ml_id=ml_id, error=str(exc))
 
-    # 3. Formatar mensagem (com imagem lifestyle ou thumbnail original)
+    # 4. Formatar mensagem (Style Guide v3)
     product = _offer_to_product(offer)
     formatter = MessageFormatter()
     msg = formatter.format(
         product,
         short_link=short_url,
+        catchy_title=catchy_title,
         enhanced_image_url=enhanced_image_url,
     )
 
-    # 4. Publicar no Telegram
+    # 5. Validar mensagem (soft — loga mas não bloqueia)
+    from src.distributor.message_validator import validate_message
+    validate_message(
+        whatsapp_text=msg.whatsapp_text,
+        free_shipping=product.free_shipping,
+        rating=product.rating,
+        review_count=product.review_count,
+        has_image=msg.image_url is not None,
+    )
+
+    # 6. Publicar no Telegram
     if not settings.telegram.bot_token or not settings.telegram.group_ids:
         logger.warning("telegram_not_configured")
         return False
@@ -225,7 +289,8 @@ async def send_next_offer(
             "offer_sent",
             ml_id=ml_id,
             score=offer["final_score"],
-            has_lifestyle_image=enhanced_image_url is not None,
+            image_source=enhanced_image_url is not None,
+            catchy_title=catchy_title or "(fallback)",
             link=short_url[:60],
         )
     else:

@@ -219,6 +219,12 @@ class OpenRouterConfig:
     lifestyle_image_model: str = field(
         default_factory=lambda: os.getenv("LIFESTYLE_IMAGE_MODEL", "nano-banana")
     )
+    # Validação de imagem com Haiku Vision (pipeline de seleção de imagem real)
+    image_validation_enabled: bool = field(
+        default_factory=lambda: os.getenv(
+            "IMAGE_VALIDATION_ENABLED", "true"
+        ).lower() == "true"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -245,6 +251,10 @@ class SenderConfig:
     # Timezone para controle de horário
     timezone: str = field(
         default_factory=lambda: os.getenv("SENDER_TIMEZONE", "America/Sao_Paulo")
+    )
+    # Método de seleção de imagem: "layered" (busca em camadas) | "lifestyle" (IA)
+    image_method: str = field(
+        default_factory=lambda: os.getenv("IMAGE_METHOD", "layered").lower()
     )
     # Bucket do Supabase Storage para imagens
     supabase_bucket: str = field(
