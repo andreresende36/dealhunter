@@ -141,7 +141,6 @@ KEYWORDS_MAP = {
         "edredom",
         "cobertor",
         "cortina",
-        "travesseiro",
     ],
     "Beleza e Cuidado Pessoal": [
         "perfume",

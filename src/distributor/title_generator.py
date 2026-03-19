@@ -23,6 +23,8 @@ import httpx
 import structlog
 
 from src.config import settings
+from src.utils.brands import extract_brand
+from src.utils.openrouter import OPENROUTER_URL
 
 logger = structlog.get_logger(__name__)
 
@@ -30,7 +32,6 @@ logger = structlog.get_logger(__name__)
 # Constantes
 # ---------------------------------------------------------------------------
 
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 HAIKU_MODEL = "anthropic/claude-haiku-4-5"
 
 # Fórmulas com pesos para random.choices()
@@ -147,29 +148,14 @@ O título DEVE ter no máximo 30 caracteres."""
 # Helpers
 # ---------------------------------------------------------------------------
 
-# Marcas conhecidas para fallback
-_KNOWN_BRANDS = [
-    "Nike", "Adidas", "Puma", "Fila", "New Balance", "Asics", "Mizuno",
-    "Under Armour", "Reebok", "Vans", "Olympikus", "Kappa",
-    "Natura", "O Boticário", "Boticário", "Avon",
-    "Growth", "Max Titanium", "Integralmedica",
-    "Samsung", "Xiaomi", "JBL", "Apple",
-    "Tramontina", "Mondial", "Electrolux",
-    "Insider", "Hering",
-]
 
-_BRAND_RE = re.compile(
-    r'\b(' + '|'.join(re.escape(b) for b in _KNOWN_BRANDS) + r')\b',
-    re.IGNORECASE,
-)
 
 
 def _fallback_title(product_title: str) -> str:
     """Gera título rule-based quando IA não está disponível."""
-    match = _BRAND_RE.search(product_title)
-    if match:
-        brand = match.group(0).upper()
-        return f"{brand} COM PREÇÃO"[:35]
+    brand = extract_brand(product_title)
+    if brand:
+        return f"{brand.upper()} COM PREÇÃO"[:35]
     return "OFERTA IMPERDÍVEL"
 
 

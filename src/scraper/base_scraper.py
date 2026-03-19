@@ -138,6 +138,7 @@ class ScrapedProduct:
             "badge": self.badge,
             "scraped_at": self.scraped_at,
             "source": self.source,
+            "marketplace": self.marketplace,
         }
 
 

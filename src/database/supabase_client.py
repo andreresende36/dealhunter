@@ -866,6 +866,23 @@ class SupabaseClient:
         except Exception as exc:
             raise SupabaseError(str(exc), operation="get_pending_images") from exc
 
+    async def discard_offer(self, scored_offer_id: str, reason: str) -> bool:
+        """Marca oferta como rejeitada (reprovada pelo validador)."""
+        try:
+            await (
+                self._db.table("scored_offers")
+                .update({"status": "rejected"})
+                .eq("id", scored_offer_id)
+                .execute()
+            )
+            await self.log_event(
+                "offer_discarded",
+                {"scored_offer_id": scored_offer_id, "reason": reason},
+            )
+            return True
+        except Exception as exc:
+            raise SupabaseError(str(exc), operation="discard_offer") from exc
+
     async def update_image_status(
         self,
         product_id: str,

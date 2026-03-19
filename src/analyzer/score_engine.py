@@ -28,6 +28,7 @@ import structlog
 
 from src.config import settings, ScoreConfig
 from src.scraper.base_scraper import ScrapedProduct
+from src.utils.brands import KNOWN_BRANDS_LOWER
 
 logger = structlog.get_logger(__name__)
 
@@ -137,15 +138,7 @@ class ScoreEngine:
     """
 
     # Marcas conhecidas populares no ML BR (lowercase)
-    _KNOWN_BRANDS: frozenset[str] = frozenset({
-        "nike", "adidas", "puma", "reebok", "new balance", "asics",
-        "samsung", "apple", "xiaomi", "motorola", "lg", "sony",
-        "philips", "electrolux", "brastemp", "consul", "arno", "mondial",
-        "tramontina", "havaianas", "reserva", "hering", "levis", "colcci",
-        "dumond", "arezzo", "lupo", "olympikus", "mizuno", "fila", "vans",
-        "converse", "lacoste", "calvin klein", "tommy hilfiger",
-        "polo ralph lauren", "under armour",
-    })
+    _KNOWN_BRANDS: frozenset[str] = KNOWN_BRANDS_LOWER
 
     # Proporcao do peso maximo de badge por tipo (chaves normalizadas)
     _BADGE_RATIO: dict[str, float] = {

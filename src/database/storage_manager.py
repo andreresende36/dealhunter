@@ -714,6 +714,31 @@ class StorageManager:
                 logger.warning("supabase_mark_sent_failed", error=str(exc))
         return local_ok
 
+    async def discard_offer(self, scored_offer_id: str, reason: str) -> bool:
+        """Marca oferta como rejeitada (reprovada pelo validador)."""
+        local_ok = False
+        try:
+            local_ok = await self._sqlite.discard_offer(
+                scored_offer_id, reason
+            )
+        except SQLiteError as exc:
+            if "FOREIGN KEY" in str(exc):
+                logger.debug(
+                    "sqlite_fk_skip",
+                    scored_offer_id=scored_offer_id,
+                    table="scored_offers",
+                )
+            else:
+                raise
+        if self._using_supabase:
+            try:
+                return await self._supabase.discard_offer(
+                    scored_offer_id, reason
+                )
+            except SupabaseError as exc:
+                logger.warning("supabase_discard_failed", error=str(exc))
+        return local_ok
+
     async def was_recently_sent(self, ml_id: str, hours: int = 24) -> bool:
         """Verifica se o produto foi enviado nas últimas N horas."""
         if self._using_supabase:

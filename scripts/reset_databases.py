@@ -107,6 +107,7 @@ async def truncate_supabase() -> None:
 async def clear_supabase_storage(bucket: str = "images", folder: str = "products") -> int:
     """
     Apaga todos os arquivos de uma pasta no Supabase Storage.
+    Itera recursivamente pelas subpastas (products/{uuid}/enhanced.jpg).
     Retorna o número de arquivos deletados.
     """
     supabase = SupabaseClient()
@@ -116,28 +117,31 @@ async def clear_supabase_storage(bucket: str = "images", folder: str = "products
         await supabase.connect()
         client = supabase._db
 
-        # Lista todos os arquivos na pasta (paginação de 100)
-        all_paths: list[str] = []
-        offset = 0
-        limit = 100
+        # Passo 1: lista subpastas em products/ (cada subpasta é um product_id)
+        subdirs = await client.storage.from_(bucket).list(folder)
+        if not subdirs:
+            logger.info("storage_folder_empty", bucket=bucket, folder=folder)
+            return 0
 
-        while True:
-            items = await client.storage.from_(bucket).list(
-                folder,
-                {"limit": limit, "offset": offset}
-            )
-            if not items:
-                break
-            all_paths.extend(f"{folder}/{item['name']}" for item in items)
-            if len(items) < limit:
-                break
-            offset += limit
+        # Passo 2: para cada subpasta, lista os arquivos dentro dela
+        all_paths: list[str] = []
+        for subdir in subdirs:
+            subdir_name = subdir.get("name", "")
+            if not subdir_name:
+                continue
+            subdir_path = f"{folder}/{subdir_name}"
+            files = await client.storage.from_(bucket).list(subdir_path)
+            if files:
+                for f in files:
+                    fname = f.get("name", "")
+                    if fname:
+                        all_paths.append(f"{subdir_path}/{fname}")
 
         if not all_paths:
             logger.info("storage_folder_empty", bucket=bucket, folder=folder)
             return 0
 
-        # Deleta em batches de 100
+        # Passo 3: deleta em batches de 100
         batch_size = 100
         for i in range(0, len(all_paths), batch_size):
             batch = all_paths[i:i + batch_size]

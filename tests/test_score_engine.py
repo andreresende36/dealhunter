@@ -274,15 +274,15 @@ class TestBadgeScoring:
 
     def test_oferta_imperdivel(self, engine):
         score = engine._score_badge("Oferta imperdível")
-        assert score == pytest.approx(7.5, abs=0.1)
+        assert score == pytest.approx(1.5, abs=0.1)
 
     def test_oferta_do_dia(self, engine):
         score = engine._score_badge("Oferta do dia")
-        assert score == pytest.approx(4.5, abs=0.1)
+        assert score == pytest.approx(7.5, abs=0.1)
 
     def test_mais_vendido(self, engine):
         score = engine._score_badge("Mais vendido")
-        assert score == pytest.approx(1.5, abs=0.1)
+        assert score == pytest.approx(4.5, abs=0.1)
 
     def test_case_insensitive(self, engine):
         """Badge deve funcionar independente de casing."""

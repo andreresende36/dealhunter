@@ -4,19 +4,21 @@ Gera mensagens formatadas para WhatsApp e Telegram.
 Template baseado na análise de 2.104 mensagens do grupo Sempre Black.
 """
 
-import re
+
 from dataclasses import dataclass
 from typing import Optional
 
 import structlog
 
 from src.scraper.base_scraper import ScrapedProduct
+from src.utils.brands import extract_brand as _extract_brand_raw
 
 logger = structlog.get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # MarkdownV2 escaping (Telegram)
 # ---------------------------------------------------------------------------
+
 
 _MDV2_TRANS: dict[int, str] = {
     ord(c): f'\\{c}' for c in r'_*[]()~`>#+-=|{}.!'
@@ -40,30 +42,12 @@ def _escape_mdv2_url(url: str) -> str:
     return url.translate(_MDV2_URL_TRANS)
 
 
-# ---------------------------------------------------------------------------
-# Marcas conhecidas para fallback de título rule-based
-# ---------------------------------------------------------------------------
-
-_KNOWN_BRANDS: list[str] = [
-    "Nike", "Adidas", "Puma", "Fila", "New Balance", "Asics", "Mizuno",
-    "Under Armour", "Reebok", "Vans", "Olympikus", "Kappa",
-    "Natura", "O Boticário", "Boticário", "Avon",
-    "Growth", "Max Titanium", "Integralmedica", "Atlhetica",
-    "Samsung", "Xiaomi", "JBL", "Apple",
-    "Tramontina", "Mondial", "Electrolux",
-    "Insider", "Hering", "Renner",
-]
-
-_BRAND_PATTERN = re.compile(
-    r'\b(' + '|'.join(re.escape(b) for b in _KNOWN_BRANDS) + r')\b',
-    re.IGNORECASE,
-)
 
 
 def _extract_brand(title: str) -> str | None:
-    """Extrai marca conhecida do título do produto."""
-    match = _BRAND_PATTERN.search(title)
-    return match.group(0).upper() if match else None
+    """Extrai marca conhecida do título do produto (UPPER CASE)."""
+    brand = _extract_brand_raw(title)
+    return brand.upper() if brand else None
 
 
 def _fallback_catchy_title(product_title: str) -> str:
