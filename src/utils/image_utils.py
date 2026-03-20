@@ -2,7 +2,7 @@
 DealHunter — Image Utilities
 Shared image processing helpers for validation pipelines.
 
-Used by: offer_validator, product_image_selector.
+Used by: product_image_selector.
 """
 
 from __future__ import annotations

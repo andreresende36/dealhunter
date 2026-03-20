@@ -70,7 +70,7 @@ def _get_window_weight(hour: int) -> float:
     return 0.14  # Fallback para janelas não mapeadas
 
 
-def calculate_send_interval() -> int:
+def calculate_send_interval() -> float:
     """
     Calcula intervalo de envio em minutos baseado na janela de horário
     e dia da semana.
@@ -111,7 +111,7 @@ def calculate_send_interval() -> int:
     # Clamp entre limites razoáveis
     interval = max(base_min, min(interval, base_max * 2))
 
-    return round(interval)
+    return interval
 
 
 async def _interruptible_sleep(seconds: float, shutdown: asyncio.Event) -> None:

@@ -210,96 +210,53 @@ async def send_next_offer(
     formatter = MessageFormatter()
 
     from src.distributor.title_generator import generate_catchy_title
-    from src.distributor.offer_validator import validate_text_only, OfferValidationResult
 
-    _MAX_VALIDATION_ATTEMPTS = 2
-    offer_approved = False
-    validation = OfferValidationResult(approved=False, reasons=["not validated"])
-
-    for attempt in range(1, _MAX_VALIDATION_ATTEMPTS + 1):
-        force_new = attempt > 1
-
-        # 2. Gerar título catchy via IA (se disponível)
-        catchy_title: str | None = None
-        if settings.openrouter.api_key:
-            try:
-                catchy_title = await generate_catchy_title(
-                    product_title=product_title,
-                    category=category,
-                    price=float(offer["current_price"]),
-                    original_price=(
-                        float(offer["original_price"])
-                        if offer.get("original_price") else None
-                    ),
-                )
-            except Exception as exc:
-                logger.warning("title_generation_failed", ml_id=ml_id, error=str(exc))
-
-        # 3. Selecionar melhor imagem real do produto
-        enhanced_image_url: str | None = None
-        image_bytes: bytes | None = None
-        if thumbnail_url:
-            enhanced_image_url, image_bytes = await _select_and_upload_image(
-                storage, product_id, ml_id, product_title,
-                thumbnail_url, category,
-                product_url=offer["product_url"],
-                force_new=force_new,
-            )
-
-        if not enhanced_image_url:
-            logger.info("sending_with_original_thumbnail", ml_id=ml_id)
-
-        # 4. Formatar mensagem (Style Guide v3)
-        msg = formatter.format(
-            product,
-            short_link=short_url,
-            catchy_title=catchy_title,
-            enhanced_image_url=enhanced_image_url,
-        )
-
-        # 5. Validar mensagem (soft — loga mas não bloqueia)
-        from src.distributor.message_validator import validate_message
-        validate_message(
-            whatsapp_text=msg.whatsapp_text,
-            free_shipping=product.free_shipping,
-            rating=product.rating,
-            review_count=product.review_count,
-            has_image=msg.image_url is not None,
-        )
-
-        # 6. Validação de texto/título (imagem já validada por camada)
-        validation = await validate_text_only(
-            whatsapp_text=msg.whatsapp_text,
-        )
-
-        if validation.approved:
-            logger.info(
-                "offer_validated",
-                ml_id=ml_id,
-                attempt=attempt,
-                reasons=validation.reasons,
-            )
-            offer_approved = True
-            break
-
-        logger.warning(
-            "offer_validation_failed",
-            ml_id=ml_id,
-            attempt=attempt,
-            reasons=validation.reasons,
-            suggestions=validation.suggestions,
-        )
-
-    if not offer_approved:
+    # 2. Gerar título catchy via IA (se disponível)
+    catchy_title: str | None = None
+    if settings.openrouter.api_key:
         try:
-            await storage.discard_offer(
-                scored_offer_id,
-                reason=f"validation_failed_2x: {validation.reasons}",
+            catchy_title = await generate_catchy_title(
+                product_title=product_title,
+                category=category,
+                price=float(offer["current_price"]),
+                original_price=(
+                    float(offer["original_price"])
+                    if offer.get("original_price") else None
+                ),
             )
         except Exception as exc:
-            logger.warning("discard_offer_failed", ml_id=ml_id, error=str(exc))
-        logger.error("offer_discarded", ml_id=ml_id, reasons=validation.reasons)
-        return False
+            logger.warning("title_generation_failed", ml_id=ml_id, error=str(exc))
+
+    # 3. Selecionar melhor imagem real do produto
+    enhanced_image_url: str | None = None
+    image_bytes: bytes | None = None
+    if thumbnail_url:
+        enhanced_image_url, image_bytes = await _select_and_upload_image(
+            storage, product_id, ml_id, product_title,
+            thumbnail_url, category,
+            product_url=offer["product_url"],
+        )
+
+    if not enhanced_image_url:
+        logger.info("sending_with_original_thumbnail", ml_id=ml_id)
+
+    # 4. Formatar mensagem (Style Guide v3)
+    msg = formatter.format(
+        product,
+        short_link=short_url,
+        catchy_title=catchy_title,
+        enhanced_image_url=enhanced_image_url,
+    )
+
+    # 5. Validar mensagem (soft — loga mas não bloqueia)
+    from src.distributor.message_validator import validate_message
+    validate_message(
+        whatsapp_text=msg.whatsapp_text,
+        free_shipping=product.free_shipping,
+        rating=product.rating,
+        review_count=product.review_count,
+        has_image=msg.image_url is not None,
+    )
 
     # 7. Publicar no Telegram
     if not settings.telegram.bot_token or not settings.telegram.group_ids:

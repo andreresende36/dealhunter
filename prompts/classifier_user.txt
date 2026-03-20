@@ -1,0 +1,6 @@
+Classify the following product into EXACTLY ONE of the provided categories. Respond with ONLY the exact category name, without any extra text or quotes.
+
+Product Title: {title}
+
+Allowed Categories:
+{categories}

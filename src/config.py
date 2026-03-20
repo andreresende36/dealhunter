@@ -219,18 +219,6 @@ class OpenRouterConfig:
     lifestyle_image_model: str = field(
         default_factory=lambda: os.getenv("LIFESTYLE_IMAGE_MODEL", "nano-banana")
     )
-    # Validação abrangente da oferta montada (imagem + título + texto) antes do envio
-    offer_validation_enabled: bool = field(
-        default_factory=lambda: os.getenv(
-            "OFFER_VALIDATION_ENABLED", "true"
-        ).lower() == "true"
-    )
-    # Modelo para validação de oferta (Gemini Flash é ~5x mais barato que Haiku)
-    offer_validation_model: str = field(
-        default_factory=lambda: os.getenv(
-            "OFFER_VALIDATION_MODEL", "google/gemini-2.5-flash"
-        )
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -247,12 +235,12 @@ class SenderConfig:
     end_hour: int = field(
         default_factory=lambda: int(os.getenv("SENDER_END_HOUR", "23"))
     )
-    # Intervalo entre envios (minutos) — escolhido aleatoriamente
-    min_interval: int = field(
-        default_factory=lambda: int(os.getenv("SENDER_MIN_INTERVAL", "3"))
+    # Intervalo entre envios (minutos) — escolhido aleatoriamente; aceita frações (ex: 0.25 = 15s)
+    min_interval: float = field(
+        default_factory=lambda: float(os.getenv("SENDER_MIN_INTERVAL", "3"))
     )
-    max_interval: int = field(
-        default_factory=lambda: int(os.getenv("SENDER_MAX_INTERVAL", "6"))
+    max_interval: float = field(
+        default_factory=lambda: float(os.getenv("SENDER_MAX_INTERVAL", "6"))
     )
     # Timezone para controle de horário
     timezone: str = field(
@@ -302,6 +290,22 @@ class Settings:
     # Ambiente de execução
     env: str = field(default_factory=lambda: os.getenv("APP_ENV", "development"))
     log_level: str = field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
+
+    # Modo de teste: relaxa todos os filtros para gerar mais ofertas rapidamente
+    test_mode: bool = field(
+        default_factory=lambda: os.getenv("TEST_MODE", "false").lower() == "true"
+    )
+
+    def __post_init__(self) -> None:
+        if self.test_mode:
+            self.score.min_discount_pct = 5.0
+            self.score.min_rating = 3.0
+            self.score.min_reviews = 0
+            self.score.min_score = 20
+            self.sender.min_interval = 0.25   # 15 segundos
+            self.sender.max_interval = 0.25   # 15 segundos
+            self.sender.start_hour = 0
+            self.sender.end_hour = 23
 
     @property
     def is_production(self) -> bool:

@@ -2,7 +2,7 @@
 DealHunter — OpenRouter API Utilities
 Shared constants, headers builder, call wrapper, and JSON parse helper.
 
-Used by: offer_validator, title_generator, product_image_selector.
+Used by: title_generator, product_image_selector.
 """
 
 from __future__ import annotations

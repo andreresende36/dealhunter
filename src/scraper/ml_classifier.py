@@ -6,6 +6,9 @@ import httpx
 import structlog
 
 from src.config import settings
+from src.prompts_loader import load_prompt
+
+_CLASSIFIER_USER_TEMPLATE = load_prompt("classifier_user")
 
 logger = structlog.get_logger(__name__)
 
@@ -515,11 +518,9 @@ async def classify_with_ai(title: str) -> str:
     if not valid_cats:
         return "Outros"
 
-    prompt = (
-        "Classify the following product into EXACTLY ONE of the provided categories. "
-        "Respond with ONLY the exact category name, without any extra text or quotes.\n\n"
-        f"Product Title: {title}\n\n"
-        "Allowed Categories:\n" + "\n".join(f"- {c}" for c in valid_cats)
+    prompt = _CLASSIFIER_USER_TEMPLATE.format(
+        title=title,
+        categories="\n".join(f"- {c}" for c in valid_cats),
     )
 
     try:
