@@ -124,6 +124,8 @@ async def _interruptible_sleep(seconds: float, shutdown: asyncio.Event) -> None:
 
 def is_sending_hours() -> bool:
     """Verifica se está no horário de envio (BRT)."""
+    if settings.test_mode:
+        return True
     tz = ZoneInfo(settings.sender.timezone)
     now = datetime.now(tz)
     return settings.sender.start_hour <= now.hour < settings.sender.end_hour

@@ -99,24 +99,7 @@ def _clean_title(raw: str) -> str:
     # Garante CAPS LOCK
     title = title.upper()
 
-    if len(title) <= 35:
-        return title
-
-    # Tenta cortar na última palavra completa antes de 35 chars
-    truncated = title[:35].rsplit(" ", 1)[0]
-
-    # Palavras que indicam corte ruim (frase incompleta)
-    bad_endings = {
-        "O", "A", "OS", "AS", "UM", "UMA", "DE", "DO", "DA",
-        "NO", "NA", "NOS", "NAS", "PRA", "PRO", "COM", "POR",
-        "EM", "E", "OU", "QUE", "AQUELE", "AQUELA", "SEU", "SUA",
-    }
-    last_word = truncated.rsplit(" ", 1)[-1] if " " in truncated else ""
-    if last_word in bad_endings or len(truncated) < 15:
-        # Corte ruim — retorna vazio pra usar fallback
-        return ""
-
-    return truncated
+    return title
 
 
 # ---------------------------------------------------------------------------
