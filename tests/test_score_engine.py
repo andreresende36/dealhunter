@@ -125,7 +125,7 @@ class TestHardFilters:
         )
         result = engine.evaluate(product)
         assert result.passed is False
-        assert result.score == 0.0
+        assert result.score == pytest.approx(0.0)
         assert "desconto" in result.reject_reason.lower()
 
     def test_reject_low_rating(self, engine):
@@ -215,10 +215,10 @@ class TestHardFilters:
 
 class TestDiscountScoring:
     def test_zero_discount(self, engine):
-        assert engine._score_discount(0) == 0.0
+        assert engine._score_discount(0) == pytest.approx(0.0)
 
     def test_negative_discount(self, engine):
-        assert engine._score_discount(-5) == 0.0
+        assert engine._score_discount(-5) == pytest.approx(0.0)
 
     def test_moderate_discount_30pct(self, engine):
         score = engine._score_discount(30)
@@ -259,10 +259,10 @@ class TestDiscountScoring:
 
 class TestBadgeScoring:
     def test_empty_badge(self, engine):
-        assert engine._score_badge("") == 0.0
+        assert engine._score_badge("") == pytest.approx(0.0)
 
     def test_none_like_badge(self, engine):
-        assert engine._score_badge("   ") == 0.0
+        assert engine._score_badge("   ") == pytest.approx(0.0)
 
     def test_oferta_relampago(self, engine):
         score = engine._score_badge("Oferta relâmpago")
@@ -291,7 +291,7 @@ class TestBadgeScoring:
         assert score_upper == score_lower
 
     def test_unknown_badge(self, engine):
-        assert engine._score_badge("Destaque da semana") == 0.0
+        assert engine._score_badge("Destaque da semana") == pytest.approx(0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -301,13 +301,13 @@ class TestBadgeScoring:
 
 class TestRatingScoring:
     def test_below_threshold(self, engine):
-        assert engine._score_rating(3.4) == 0.0
+        assert engine._score_rating(3.4) == pytest.approx(0.0)
 
     def test_at_threshold(self, engine):
-        assert engine._score_rating(3.5) == 0.0
+        assert engine._score_rating(3.5) == pytest.approx(0.0)
 
     def test_perfect_rating(self, engine):
-        assert engine._score_rating(5.0) == 15.0
+        assert engine._score_rating(5.0) == pytest.approx(15.0)
 
     def test_good_rating(self, engine):
         score = engine._score_rating(4.5)
@@ -330,13 +330,13 @@ class TestRatingScoring:
 
 class TestReviewsScoring:
     def test_zero_reviews(self, engine):
-        assert engine._score_reviews(0) == 0.0
+        assert engine._score_reviews(0) == pytest.approx(0.0)
 
     def test_saturates_at_5000(self, engine):
-        assert engine._score_reviews(5000) == 10.0
+        assert engine._score_reviews(5000) == pytest.approx(10.0)
 
     def test_above_5000(self, engine):
-        assert engine._score_reviews(10000) == 10.0
+        assert engine._score_reviews(10000) == pytest.approx(10.0)
 
     def test_logarithmic_curve(self, engine):
         """Primeiras reviews devem valer mais (curva log)."""
@@ -367,21 +367,21 @@ class TestReviewsScoring:
 class TestBinaryScoring:
     def test_free_shipping_yes(self, engine, great_product):
         result = engine.evaluate(great_product)
-        assert result.breakdown.free_shipping.raw_score == 10.0
+        assert result.breakdown.free_shipping.raw_score == pytest.approx(10.0)
 
     def test_free_shipping_no(self, engine, great_product):
         great_product.free_shipping = False
         result = engine.evaluate(great_product)
-        assert result.breakdown.free_shipping.raw_score == 0.0
+        assert result.breakdown.free_shipping.raw_score == pytest.approx(0.0)
 
     def test_installments_yes(self, engine, great_product):
         result = engine.evaluate(great_product)
-        assert result.breakdown.installments.raw_score == 10.0
+        assert result.breakdown.installments.raw_score == pytest.approx(10.0)
 
     def test_installments_no(self, engine, great_product):
         great_product.installments_without_interest = False
         result = engine.evaluate(great_product)
-        assert result.breakdown.installments.raw_score == 0.0
+        assert result.breakdown.installments.raw_score == pytest.approx(0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -391,7 +391,7 @@ class TestBinaryScoring:
 
 class TestTitleScoring:
     def test_empty_title(self, engine):
-        assert engine._score_title("") == 0.0
+        assert engine._score_title("") == pytest.approx(0.0)
 
     def test_good_title_with_brand(self, engine):
         score = engine._score_title("Tenis Nike Air Max 270 Masculino Original")
@@ -462,11 +462,11 @@ class TestRedistribution:
     def test_unavailable_criteria_get_zero(self, engine, card_only_product):
         """Criterios indisponiveis devem ter final_score = 0."""
         result = engine.evaluate(card_only_product)
-        assert result.breakdown.badge.final_score == 0.0
+        assert result.breakdown.badge.final_score == pytest.approx(0.0)
         assert result.breakdown.badge.available is False
-        assert result.breakdown.rating.final_score == 0.0
+        assert result.breakdown.rating.final_score == pytest.approx(0.0)
         assert result.breakdown.rating.available is False
-        assert result.breakdown.reviews.final_score == 0.0
+        assert result.breakdown.reviews.final_score == pytest.approx(0.0)
         assert result.breakdown.reviews.available is False
 
     def test_available_criteria_amplified(self, engine, card_only_product):

@@ -224,7 +224,7 @@ async def api_loop(shutdown: asyncio.Event) -> None:
         await shutdown.wait()
         server.should_exit = True
 
-    asyncio.create_task(watch_shutdown())
+    _shutdown_task = asyncio.create_task(watch_shutdown())
     await server.serve()
 
 

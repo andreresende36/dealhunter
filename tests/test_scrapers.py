@@ -223,7 +223,7 @@ class TestScrapedProduct:
             price=100.0,
             original_price=200.0,
         )
-        assert p.discount_pct == 50.0
+        assert p.discount_pct == pytest.approx(50.0)
 
     def test_discount_pct_zero_when_no_original(self):
         p = ScrapedProduct(
@@ -233,7 +233,7 @@ class TestScrapedProduct:
             price=100.0,
             original_price=None,
         )
-        assert p.discount_pct == 0.0
+        assert p.discount_pct == pytest.approx(0.0)
 
     def test_discount_pct_zero_when_original_lower(self):
         p = ScrapedProduct(
@@ -243,7 +243,7 @@ class TestScrapedProduct:
             price=200.0,
             original_price=100.0,
         )
-        assert p.discount_pct == 0.0
+        assert p.discount_pct == pytest.approx(0.0)
 
     def test_to_dict_has_all_fields(self, sample_product):
         d = sample_product.to_dict()
@@ -262,7 +262,7 @@ class TestScrapedProduct:
             price=299.90,
             original_price=599.90,
         )
-        assert p.discount_pct == 50.0
+        assert p.discount_pct == pytest.approx(50.0)
 
 
 # ===========================================================================
@@ -307,19 +307,19 @@ class TestCleanPrice:
         self.scraper = _make_scraper()
 
     def test_integer(self):
-        assert self.scraper._clean_price("299") == 299.0
+        assert self.scraper._clean_price("299") == pytest.approx(299.0)
 
     def test_with_thousands_separator(self):
-        assert self.scraper._clean_price("1.299") == 1299.0
+        assert self.scraper._clean_price("1.299") == pytest.approx(1299.0)
 
     def test_with_decimal(self):
-        assert self.scraper._clean_price("99,90") == 99.90
+        assert self.scraper._clean_price("99,90") == pytest.approx(99.90)
 
     def test_full_br_format(self):
-        assert self.scraper._clean_price("1.299,90") == 1299.90
+        assert self.scraper._clean_price("1.299,90") == pytest.approx(1299.90)
 
     def test_large_number(self):
-        assert self.scraper._clean_price("12.999,99") == 12999.99
+        assert self.scraper._clean_price("12.999,99") == pytest.approx(12999.99)
 
     def test_none_on_invalid(self):
         assert self.scraper._clean_price("abc") is None
@@ -328,7 +328,7 @@ class TestCleanPrice:
         assert self.scraper._clean_price("") is None
 
     def test_strips_currency(self):
-        assert self.scraper._clean_price("R$ 299,90") == 299.90
+        assert self.scraper._clean_price("R$ 299,90") == pytest.approx(299.90)
 
 
 # ===========================================================================
@@ -341,19 +341,19 @@ class TestParseDiscountPct:
         self.scraper = _make_scraper()
 
     def test_standard_format(self):
-        assert self.scraper._parse_discount_pct("50% OFF") == 50.0
+        assert self.scraper._parse_discount_pct("50% OFF") == pytest.approx(50.0)
 
     def test_just_percent(self):
-        assert self.scraper._parse_discount_pct("30%") == 30.0
+        assert self.scraper._parse_discount_pct("30%") == pytest.approx(30.0)
 
     def test_with_spaces(self):
-        assert self.scraper._parse_discount_pct("  25 % de desconto") == 25.0
+        assert self.scraper._parse_discount_pct("  25 % de desconto") == pytest.approx(25.0)
 
     def test_no_discount(self):
-        assert self.scraper._parse_discount_pct("sem desconto") == 0.0
+        assert self.scraper._parse_discount_pct("sem desconto") == pytest.approx(0.0)
 
     def test_empty(self):
-        assert self.scraper._parse_discount_pct("") == 0.0
+        assert self.scraper._parse_discount_pct("") == pytest.approx(0.0)
 
 
 # ===========================================================================
@@ -382,23 +382,23 @@ class TestPriceFromAndes:
 
     def test_fraction_only(self):
         container = self._make_container("299")
-        assert self.scraper._price_from_andes(container) == 299.0
+        assert self.scraper._price_from_andes(container) == pytest.approx(299.0)
 
     def test_fraction_with_cents(self):
         container = self._make_container("299", ",90")
-        assert self.scraper._price_from_andes(container) == 299.90
+        assert self.scraper._price_from_andes(container) == pytest.approx(299.90)
 
     def test_fraction_with_thousands(self):
         container = self._make_container("1.299")
-        assert self.scraper._price_from_andes(container) == 1299.0
+        assert self.scraper._price_from_andes(container) == pytest.approx(1299.0)
 
     def test_fraction_with_thousands_and_cents(self):
         container = self._make_container("1.299", ",90")
-        assert self.scraper._price_from_andes(container) == 1299.90
+        assert self.scraper._price_from_andes(container) == pytest.approx(1299.90)
 
     def test_cents_without_comma(self):
         container = self._make_container("99", "50")
-        assert self.scraper._price_from_andes(container) == 99.50
+        assert self.scraper._price_from_andes(container) == pytest.approx(99.50)
 
     def test_no_fraction_returns_none(self):
         from bs4 import BeautifulSoup
@@ -427,9 +427,9 @@ class TestParsePagePoly:
         p = products[0]
         assert p.ml_id == "MLB111222333"
         assert p.title == "Tênis Nike Air Max 270 Masculino"
-        assert p.price == 299.90
-        assert p.original_price == 599.90
-        assert p.discount_pct == 50.0
+        assert p.price == pytest.approx(299.90)
+        assert p.original_price == pytest.approx(599.90)
+        assert p.discount_pct == pytest.approx(50.0)
         assert p.free_shipping is True
         assert p.image_url == "https://http2.mlstatic.com/tenis-nike.webp"
         assert p.source == "ofertas_do_dia"
@@ -438,8 +438,8 @@ class TestParsePagePoly:
         products = self.scraper._parse_page(html_poly_cards, _DEFAULT_SOURCE)
         p = products[1]
         assert p.ml_id == "MLB444555666"
-        assert p.price == 1299.0
-        assert p.original_price == 2599.0
+        assert p.price == pytest.approx(1299.0)
+        assert p.original_price == pytest.approx(2599.0)
         assert p.free_shipping is False
         assert p.url.startswith("https://")  # URL relativa convertida
 
@@ -448,8 +448,8 @@ class TestParsePagePoly:
         p = products[2]
         # MLB-777888999 normalizado para MLB777888999
         assert p.ml_id == "MLB777888999"
-        assert p.price == 189.99
-        assert p.original_price == 349.0
+        assert p.price == pytest.approx(189.99)
+        assert p.original_price == pytest.approx(349.0)
         assert p.free_shipping is True
 
     def test_invalid_items_excluded(self, html_poly_cards):
@@ -479,8 +479,8 @@ class TestParsePageLegacy:
         p = products[0]
         assert p.ml_id == "MLB999000111"
         assert p.title == "Tênis Adidas Superstar Branco"
-        assert p.price == 249.0
-        assert p.original_price == 499.0
+        assert p.price == pytest.approx(249.0)
+        assert p.original_price == pytest.approx(499.0)
         assert p.free_shipping is True
 
 
@@ -711,9 +711,9 @@ class TestScrapeIntegration:
 
         assert len(products) == 3
         assert products[0].ml_id == "MLB111222333"
-        assert products[0].price == 299.90
+        assert products[0].price == pytest.approx(299.90)
         assert products[1].ml_id == "MLB444555666"
-        assert products[1].price == 1299.0
+        assert products[1].price == pytest.approx(1299.0)
         assert products[2].ml_id == "MLB777888999"
 
     @pytest.mark.asyncio
@@ -889,8 +889,8 @@ class TestPriceExtraction:
         card = soup.select_one(".poly-card")
 
         card_price, _pix = self.scraper._get_prices(card)
-        assert card_price == 499.90
-        assert self.scraper._get_original_price(card) == 999.0
+        assert card_price == pytest.approx(499.90)
+        assert self.scraper._get_original_price(card) == pytest.approx(999.0)
 
     def test_prices_from_del_tag(self):
         from bs4 import BeautifulSoup
@@ -907,8 +907,8 @@ class TestPriceExtraction:
         card = soup.select_one(".promotion-item")
 
         card_price, _pix = self.scraper._get_prices(card)
-        assert card_price == 249.0
-        assert self.scraper._get_original_price(card) == 499.0
+        assert card_price == pytest.approx(249.0)
+        assert self.scraper._get_original_price(card) == pytest.approx(499.0)
 
     def test_no_original_price(self):
         from bs4 import BeautifulSoup
@@ -924,5 +924,5 @@ class TestPriceExtraction:
         card = soup.select_one(".poly-card")
 
         card_price, _pix = self.scraper._get_prices(card)
-        assert card_price == 99.0
+        assert card_price == pytest.approx(99.0)
         assert self.scraper._get_original_price(card) is None

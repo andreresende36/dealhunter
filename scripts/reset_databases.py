@@ -178,7 +178,7 @@ async def main(include_supabase: bool = False, clear_storage: bool = False) -> N
         print("⚠️  Storage: NÃO (imagens serão mantidas)")
 
     print("\n" + "-" * 70)
-    response = input("Tem certeza? (digite 'SIM' para confirmar): ").strip()
+    response = (await asyncio.to_thread(input, "Tem certeza? (digite 'SIM' para confirmar): ")).strip()
 
     if response.upper() != "SIM":
         print("\n❌ Operação cancelada.")

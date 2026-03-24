@@ -186,7 +186,7 @@ class TestSQLiteFallbackIntegration:
         # 5. Buscar histórico
         history = await sqlite_db.get_price_history(product_id, days=30)
         assert len(history) == 1
-        assert history[0]["price"] == 299.90
+        assert history[0]["price"] == pytest.approx(299.90)
 
         # 6. Salvar scored offer
         offer_id = await sqlite_db.save_scored_offer(
