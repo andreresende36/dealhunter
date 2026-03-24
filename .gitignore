@@ -32,3 +32,6 @@ logs/
 
 # Debug
 debug/
+
+# Documentos de referência (não versionados)
+reference/
