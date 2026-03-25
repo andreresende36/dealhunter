@@ -67,6 +67,11 @@
       "url": "https://www.mercadolivre.com.br/ofertas?category=MLB1430"
     },
     {
+      "source": "cameras_e_acessorios",
+      "name": "Câmeras e Acessórios",
+      "url": "https://www.mercadolivre.com.br/ofertas?category=MLB1039"
+    },
+    {
       "source": "casa_moveis_e_decoracao",
       "name": "Casa, Móveis e Decoração",
       "url": "https://www.mercadolivre.com.br/ofertas?category=MLB1574"
@@ -80,11 +85,6 @@
       "source": "construcao",
       "name": "Construção",
       "url": "https://www.mercadolivre.com.br/ofertas?category=MLB1501"
-    },
-    {
-      "source": "cameras_e_acessorios",
-      "name": "Câmeras e Acessórios",
-      "url": "https://www.mercadolivre.com.br/ofertas?category=MLB1039"
     },
     {
       "source": "eletrodomesticos",

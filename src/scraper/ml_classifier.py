@@ -503,10 +503,9 @@ def get_product_category(title: str) -> str:
     """Convenience function mapped to shared classifier."""
     return classifier_instance.classify(title)
 
-
 async def classify_with_ai(title: str) -> str:
     """
-    Classifies a product using OpenRouter LLM.
+    Classifies a product using OpenRouter LLM (google/gemini-2.5-flash).
     Returns the category name if matched, or 'Outros' on failure.
     """
     api_key = settings.openrouter.api_key
@@ -530,11 +529,11 @@ async def classify_with_ai(title: str) -> str:
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
-                    "HTTP-Referer": "https://crivo.ai",  # Optional
-                    "X-Title": "Crivo",  # Optional
+                    "HTTP-Referer": "https://crivo.ai",
+                    "X-Title": "Crivo",
                 },
                 json={
-                    "model": "google/gemini-2.5-flash",  # Fast and extremely cheap
+                    "model": "google/gemini-2.5-flash",
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.0,
                     "max_tokens": 50,
@@ -542,9 +541,12 @@ async def classify_with_ai(title: str) -> str:
             )
             resp.raise_for_status()
             data = resp.json()
-            answer = data["choices"][0]["message"]["content"].strip()
+            raw = data["choices"][0]["message"]["content"]
+            if not raw:
+                logger.warning("ai_classification_empty", title=title)
+                return "Outros"
+            answer = raw.strip()
 
-            # Clean up the answer (just in case)
             for cat in valid_cats:
                 if cat.lower() == answer.lower() or answer.lower().startswith(
                     cat.lower()

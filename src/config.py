@@ -150,6 +150,10 @@ class ScraperConfig:
     max_pages: int = field(
         default_factory=lambda: int(os.getenv("SCRAPER_MAX_PAGES", "10"))
     )
+    # Número máximo de fontes sendo raspadas em paralelo
+    max_concurrent: int = field(
+        default_factory=lambda: int(os.getenv("SCRAPER_MAX_CONCURRENT", "5"))
+    )
     # Proxy (opcional): "http://user:pass@host:port"
     proxy_url: str | None = field(
         default_factory=lambda: os.getenv("SCRAPER_PROXY_URL")

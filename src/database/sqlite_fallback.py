@@ -1237,7 +1237,7 @@ class SQLiteFallback:
         try:
             rows = []
             for i, e in enumerate(entries):
-                row_id = (offer_ids[i] if offer_ids else None) or str(uuid.uuid4())
+                row_id = (offer_ids[i] if offer_ids and i < len(offer_ids) else None) or str(uuid.uuid4())
                 ids.append(row_id)
                 rows.append(
                     (

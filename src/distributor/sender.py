@@ -63,6 +63,15 @@ class UnsentOfferRow(TypedDict):
 # ---------------------------------------------------------------------------
 
 
+def _safe_number(value: object, default: float = 0) -> float:
+    """Extract a numeric value, handling lists returned by Supabase JOINs."""
+    if value is None:
+        return default
+    if isinstance(value, list):
+        return float(value[0]) if value else default
+    return float(value)
+
+
 def _offer_to_product(offer: UnsentOfferRow) -> ScrapedProduct:
     """Converte a linha da view vw_approved_unsent em ScrapedProduct."""
     pix_price_raw = offer.get("pix_price")
@@ -71,14 +80,14 @@ def _offer_to_product(offer: UnsentOfferRow) -> ScrapedProduct:
         ml_id=offer["ml_id"],
         url=offer["product_url"],
         title=offer["title"],
-        price=float(offer["current_price"]),
+        price=_safe_number(offer["current_price"]),
         original_price=(
-            float(orig_price_raw) if orig_price_raw is not None else None
+            _safe_number(orig_price_raw) if orig_price_raw is not None else None
         ),
-        pix_price=float(pix_price_raw) if pix_price_raw else None,
-        discount_pct=float(offer.get("discount_percent") or 0),
-        rating=float(offer.get("rating_stars") or 0),
-        review_count=int(offer.get("rating_count") or 0),
+        pix_price=_safe_number(pix_price_raw) if pix_price_raw else None,
+        discount_pct=_safe_number(offer.get("discount_percent")),
+        rating=_safe_number(offer.get("rating_stars")),
+        review_count=int(_safe_number(offer.get("rating_count"))),
         category=offer.get("category") or "",
         image_url=offer.get("thumbnail_url") or "",
         free_shipping=bool(offer.get("free_shipping", False)),
