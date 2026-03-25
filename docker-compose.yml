@@ -1,6 +1,6 @@
 # =============================================================================
 # Crivo — Docker Compose
-# Serviços: app (scraper+sender+api), admin (Next.js)
+# Serviços: redis, scraper, sender, api, admin (Next.js)
 # Uso: docker compose up -d
 # =============================================================================
 
@@ -10,18 +10,103 @@ networks:
 
 volumes:
   crivo_data:
+  redis_data:
 
 services:
 
   # ---------------------------------------------------------------------------
-  # Crivo — Aplicação principal (scraper + sender + API na porta 8000)
+  # Redis — Estado compartilhado entre containers (MonitorState)
   # ---------------------------------------------------------------------------
-  app:
+  redis:
+    image: redis:7-alpine
+    container_name: crivo_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 64mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    networks:
+      - net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # ---------------------------------------------------------------------------
+  # Scraper — Pipeline de coleta do Mercado Livre (roda a cada 1h)
+  # ---------------------------------------------------------------------------
+  scraper:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: crivo_app
+    container_name: crivo_scraper
     restart: unless-stopped
+    command: python -m src.workers.scraper_worker
+    env_file: .env
+    volumes:
+      - crivo_data:/app/data
+      - ./src:/app/src:ro
+      - ./logs:/app/logs
+    networks:
+      - net
+    environment:
+      - APP_ENV=${APP_ENV:-development}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - USE_REDIS_STATE=true
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import redis; r=redis.from_url('redis://redis:6379/0'); r.ping()"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # Sender — Envio de ofertas com distribuição temporal (8h-23h BRT)
+  # ---------------------------------------------------------------------------
+  sender:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: crivo_sender
+    restart: unless-stopped
+    command: python -m src.workers.sender_worker
+    env_file: .env
+    volumes:
+      - crivo_data:/app/data
+      - ./src:/app/src:ro
+      - ./logs:/app/logs
+    networks:
+      - net
+    environment:
+      - APP_ENV=${APP_ENV:-development}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - USE_REDIS_STATE=true
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import redis; r=redis.from_url('redis://redis:6379/0'); r.ping()"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # API — FastAPI/Uvicorn na porta 8000 (lê estado do Redis)
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: crivo_api
+    restart: unless-stopped
+    command: python -m src.workers.api_worker
     env_file: .env
     ports:
       - "8000:8000"
@@ -34,12 +119,17 @@ services:
     environment:
       - APP_ENV=${APP_ENV:-development}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - USE_REDIS_STATE=true
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "from src.config import settings; print('ok')"]
-      interval: 60s
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/state')"]
+      interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 20s
 
   # ---------------------------------------------------------------------------
   # Admin — Painel Next.js (porta 3000)
@@ -56,9 +146,8 @@ services:
     environment:
       - NEXT_PUBLIC_SUPABASE_URL=${SUPABASE_URL}
       - NEXT_PUBLIC_SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
-      - NEXT_PUBLIC_API_URL=http://app:8000
+      - NEXT_PUBLIC_API_URL=http://api:8000
     networks:
       - net
     depends_on:
-      - app
-
+      - api

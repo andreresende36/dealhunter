@@ -30,7 +30,7 @@ from src.main import run_pipeline
 from src.distributor.sender import send_next_offer
 from src.monitoring.alert_bot import AlertBot
 from src.monitoring.health_check import HealthCheck
-from src.monitoring.state import MonitorState
+from src.monitoring.state import set_next_scrape_time, set_next_send_time, set_is_sending_hours
 from src.distributor.title_review_bot import TitleReviewBot
 import uvicorn
 
@@ -156,7 +156,7 @@ async def scraper_loop(
             except Exception:
                 pass
 
-        MonitorState.next_scrape_time = datetime.now() + timedelta(seconds=interval)
+        await set_next_scrape_time(datetime.now() + timedelta(seconds=interval))
         await _interruptible_sleep(interval, shutdown)
 
 
@@ -170,7 +170,7 @@ async def sender_loop(
 
     while not shutdown.is_set():
         is_sending = is_sending_hours()
-        MonitorState.is_sending_hours = is_sending
+        await set_is_sending_hours(is_sending)
         if not is_sending:
             tz = ZoneInfo(settings.sender.timezone)
             now = datetime.now(tz)
@@ -179,7 +179,7 @@ async def sender_loop(
                 current_hour=now.hour,
                 window=f"{settings.sender.start_hour}h-{settings.sender.end_hour}h",
             )
-            MonitorState.next_send_time = datetime.now() + timedelta(seconds=60)
+            await set_next_send_time(datetime.now() + timedelta(seconds=60))
             await _interruptible_sleep(60, shutdown)
             continue
 
@@ -208,7 +208,7 @@ async def sender_loop(
             window_weight=window_weight,
             day=now.strftime("%A"),
         )
-        MonitorState.next_send_time = datetime.now() + timedelta(minutes=delay_minutes)
+        await set_next_send_time(datetime.now() + timedelta(minutes=delay_minutes))
         await _interruptible_sleep(delay_minutes * 60, shutdown)
 
 

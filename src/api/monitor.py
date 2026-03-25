@@ -10,7 +10,7 @@ from fastapi.responses import RedirectResponse
 import os
 import structlog
 
-from src.monitoring.state import MonitorState
+from src.monitoring.state import read_state
 from src.database.storage_manager import StorageManager
 from src.api.admin import router as admin_router
 
@@ -37,7 +37,7 @@ app.include_router(admin_router)
 @app.get("/api/state")
 async def get_state():
     """Retorna os timers de envio e scraping em tempo real."""
-    return MonitorState.get_state()
+    return await read_state()
 
 
 @app.get("/api/queue")

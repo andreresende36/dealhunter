@@ -286,6 +286,18 @@ class TitleReviewConfig:
 
 
 # ---------------------------------------------------------------------------
+# Redis (estado compartilhado entre containers)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RedisConfig:
+    url: str = field(
+        default_factory=lambda: os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    )
+
+
+# ---------------------------------------------------------------------------
 # SQLite Fallback
 # ---------------------------------------------------------------------------
 
@@ -316,6 +328,7 @@ class Settings:
     sender: SenderConfig = field(default_factory=SenderConfig)
     title_review: TitleReviewConfig = field(default_factory=TitleReviewConfig)
     sqlite: SQLiteConfig = field(default_factory=SQLiteConfig)
+    redis: RedisConfig = field(default_factory=RedisConfig)
 
     # Ambiente de execução
     env: str = field(default_factory=lambda: os.getenv("APP_ENV", "development"))
@@ -324,6 +337,11 @@ class Settings:
     # Modo de teste: relaxa todos os filtros para gerar mais ofertas rapidamente
     test_mode: bool = field(
         default_factory=lambda: os.getenv("TEST_MODE", "false").lower() == "true"
+    )
+
+    # Usa Redis para MonitorState entre containers (false = in-memory, para dev local)
+    use_redis_state: bool = field(
+        default_factory=lambda: os.getenv("USE_REDIS_STATE", "false").lower() == "true"
     )
 
     def __post_init__(self) -> None:
