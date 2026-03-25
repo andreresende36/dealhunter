@@ -26,7 +26,7 @@ import structlog
 from src.logging_config import setup_logging
 from src.config import settings
 from src.database.storage_manager import StorageManager
-from src.main import run_pipeline
+from src.scraper.pipeline import run_pipeline
 from src.distributor.sender import send_next_offer
 from src.monitoring.alert_bot import AlertBot
 from src.monitoring.health_check import HealthCheck

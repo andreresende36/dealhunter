@@ -264,7 +264,7 @@ async def scrape_now(
     _user: CurrentUser,
 ):
     """Dispara um ciclo de scraping imediato."""
-    from src.main import run_pipeline
+    from src.scraper.pipeline import run_pipeline
 
     async with StorageManager() as storage:
         stats = await run_pipeline(storage)
