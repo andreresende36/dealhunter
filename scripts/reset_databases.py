@@ -101,7 +101,7 @@ async def truncate_supabase() -> None:
     except Exception as e:
         logger.error("supabase_connect_failed", error=str(e))
     finally:
-        await supabase.close()
+        supabase.close()
 
 
 async def _list_all_storage_paths(client: object, bucket: str, folder: str) -> list[str]:
@@ -158,7 +158,7 @@ async def clear_supabase_storage(bucket: str = "images", folder: str = "products
         logger.error("storage_clear_failed", bucket=bucket, folder=folder, error=str(e))
         raise
     finally:
-        await supabase.close()
+        supabase.close()
 
 
 async def main(include_supabase: bool = False, clear_storage: bool = False) -> None:
