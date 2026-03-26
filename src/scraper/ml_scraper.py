@@ -26,7 +26,13 @@ from playwright.async_api import Page
 
 from src.config import settings
 from .base_scraper import BaseScraper, CaptchaError, RateLimitError, ScrapedProduct
-from .ml_classifier import get_product_category, classify_with_ai
+from .ml_classifier import (
+    get_product_category,
+    classify_with_ai,
+    get_product_gender,
+    classify_gender_with_ai,
+    GENDER_RELEVANT_CATEGORIES,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -365,6 +371,7 @@ class MLScraper(BaseScraper):
 
             # AI enrichment apenas para produtos NOVOS
             new_page = await self._enrich_categories_with_ai(new_page)
+            new_page = await self._enrich_gender(new_page)
 
             # Retorna TODOS para o pipeline (novos + existentes)
             products.extend(new_page)
@@ -446,6 +453,45 @@ class MLScraper(BaseScraper):
         await asyncio.gather(*[_classify_and_update(p) for p in outros_products])
 
         logger.info("ai_enrichment_done")
+        return products
+
+    async def _enrich_gender(
+        self, products: list[ScrapedProduct]
+    ) -> list[ScrapedProduct]:
+        """
+        Classifica o gênero de produtos em categorias relevantes.
+
+        1. Tenta keyword rápida para todos.
+        2. Produtos incertos (keyword retornou None) → chamada IA em batch.
+        Produtos fora das categorias relevantes ficam com "Sem gênero".
+        """
+        needs_ai: list[ScrapedProduct] = []
+
+        for p in products:
+            result = get_product_gender(p.title, p.category)
+            if result is None:
+                needs_ai.append(p)
+            else:
+                p.gender = result
+
+        if not needs_ai:
+            return products
+
+        logger.info("ai_gender_enrichment_start", count=len(needs_ai))
+
+        async def _classify_gender_and_update(p: ScrapedProduct):
+            try:
+                p.gender = await classify_gender_with_ai(p.title)
+            except Exception as e:
+                logger.warning("ai_gender_enrichment_failed", title=p.title, error=str(e))
+                p.gender = "Unissex"
+
+        await asyncio.gather(*[_classify_gender_and_update(p) for p in needs_ai])
+
+        logger.info(
+            "ai_gender_enrichment_done",
+            relevant_categories=list(GENDER_RELEVANT_CATEGORIES),
+        )
         return products
 
     # ------------------------------------------------------------------

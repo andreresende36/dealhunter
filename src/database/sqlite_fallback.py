@@ -139,6 +139,7 @@ class SQLiteFallback:
             rating_count      INTEGER DEFAULT 0,
             free_shipping     INTEGER DEFAULT 0,
             installments_without_interest INTEGER DEFAULT 0,
+            gender            TEXT DEFAULT 'Sem gênero',
             thumbnail_url     TEXT DEFAULT '',
             product_url       TEXT DEFAULT '',
             category_id       TEXT REFERENCES categories(id),
@@ -289,6 +290,7 @@ class SQLiteFallback:
             ("marketplace_id", "TEXT REFERENCES marketplaces(id)"),
             ("installments_without_interest", "INTEGER DEFAULT 0"),
             ("pix_price", "REAL"),
+            ("gender", "TEXT DEFAULT 'Sem gênero'"),
         ]:
             try:
                 await self._db.execute(f"ALTER TABLE products ADD COLUMN {col} {ref}")
@@ -533,14 +535,19 @@ class SQLiteFallback:
             row = await cursor.fetchone()
             if row and row["id"] != remote_id:
                 local_id = row["id"]
-                await self._db.execute(
-                    f"UPDATE products SET {product_col} = ? WHERE {product_col} = ?",  # noqa: S608
-                    (remote_id, local_id),
-                )
-                await self._db.execute(
-                    f"UPDATE {table} SET id = ? WHERE name = ?",  # noqa: S608
-                    (remote_id, name),
-                )
+                # FK constraints impediriam UPDATE no PK — desliga temporariamente
+                await self._db.execute("PRAGMA foreign_keys=OFF")
+                try:
+                    await self._db.execute(
+                        f"UPDATE {table} SET id = ? WHERE name = ?",  # noqa: S608
+                        (remote_id, name),
+                    )
+                    await self._db.execute(
+                        f"UPDATE products SET {product_col} = ? WHERE {product_col} = ?",  # noqa: S608
+                        (remote_id, local_id),
+                    )
+                finally:
+                    await self._db.execute("PRAGMA foreign_keys=ON")
             elif not row:
                 await self._db.execute(
                     f"INSERT INTO {table} (id, name) VALUES (?, ?)",  # noqa: S608
@@ -648,15 +655,19 @@ class SQLiteFallback:
                 await self._db.commit()
             elif row["id"] != badge_id:
                 local_id = row["id"]
-                await self._db.execute(
-                    "UPDATE products SET badge_id = ? WHERE badge_id = ?",
-                    (badge_id, local_id),
-                )
-                await self._db.execute(
-                    "UPDATE badges SET id = ? WHERE name = ?",
-                    (badge_id, name),
-                )
-                await self._db.commit()
+                await self._db.execute("PRAGMA foreign_keys=OFF")
+                try:
+                    await self._db.execute(
+                        "UPDATE badges SET id = ? WHERE name = ?",
+                        (badge_id, name),
+                    )
+                    await self._db.execute(
+                        "UPDATE products SET badge_id = ? WHERE badge_id = ?",
+                        (badge_id, local_id),
+                    )
+                    await self._db.commit()
+                finally:
+                    await self._db.execute("PRAGMA foreign_keys=ON")
         except Exception as exc:
             logger.warning("sqlite_ensure_badge_id_failed", name=name, error=str(exc))
 
@@ -713,15 +724,19 @@ class SQLiteFallback:
                 await self._db.commit()
             elif row["id"] != category_id:
                 local_id = row["id"]
-                await self._db.execute(
-                    "UPDATE products SET category_id = ? WHERE category_id = ?",
-                    (category_id, local_id),
-                )
-                await self._db.execute(
-                    "UPDATE categories SET id = ? WHERE name = ?",
-                    (category_id, name),
-                )
-                await self._db.commit()
+                await self._db.execute("PRAGMA foreign_keys=OFF")
+                try:
+                    await self._db.execute(
+                        "UPDATE categories SET id = ? WHERE name = ?",
+                        (category_id, name),
+                    )
+                    await self._db.execute(
+                        "UPDATE products SET category_id = ? WHERE category_id = ?",
+                        (category_id, local_id),
+                    )
+                    await self._db.commit()
+                finally:
+                    await self._db.execute("PRAGMA foreign_keys=ON")
         except Exception as exc:
             logger.warning(
                 "sqlite_ensure_category_id_failed", name=name, error=str(exc)
@@ -773,15 +788,19 @@ class SQLiteFallback:
                 await self._db.commit()
             elif row["id"] != marketplace_id:
                 local_id = row["id"]
-                await self._db.execute(
-                    "UPDATE products SET marketplace_id = ? WHERE marketplace_id = ?",
-                    (marketplace_id, local_id),
-                )
-                await self._db.execute(
-                    "UPDATE marketplaces SET id = ? WHERE name = ?",
-                    (marketplace_id, name),
-                )
-                await self._db.commit()
+                await self._db.execute("PRAGMA foreign_keys=OFF")
+                try:
+                    await self._db.execute(
+                        "UPDATE marketplaces SET id = ? WHERE name = ?",
+                        (marketplace_id, name),
+                    )
+                    await self._db.execute(
+                        "UPDATE products SET marketplace_id = ? WHERE marketplace_id = ?",
+                        (marketplace_id, local_id),
+                    )
+                    await self._db.commit()
+                finally:
+                    await self._db.execute("PRAGMA foreign_keys=ON")
         except Exception as exc:
             logger.warning(
                 "sqlite_ensure_marketplace_id_failed", name=name, error=str(exc)
@@ -833,9 +852,9 @@ class SQLiteFallback:
                         title=?, current_price=?, original_price=?,
                         pix_price=?, discount_percent=?,
                         rating_stars=?, rating_count=?,
-                        free_shipping=?, installments_without_interest=?, thumbnail_url=?,
-                        product_url=?, category_id=?, badge_id=?, marketplace_id=?,
-                        first_seen_at=?, last_seen_at=?, synced=0
+                        free_shipping=?, installments_without_interest=?, gender=?,
+                        thumbnail_url=?, product_url=?, category_id=?, badge_id=?,
+                        marketplace_id=?, first_seen_at=?, last_seen_at=?, synced=0
                     WHERE ml_id=?
                     """,
                     (
@@ -848,6 +867,7 @@ class SQLiteFallback:
                         product.review_count,
                         int(product.free_shipping),
                         int(product.installments_without_interest),
+                        product.gender,
                         product.image_url,
                         product.url,
                         category_id,
@@ -866,10 +886,11 @@ class SQLiteFallback:
                         id, ml_id, title, current_price, original_price,
                         pix_price, discount_percent,
                         rating_stars, rating_count,
-                        free_shipping, installments_without_interest, thumbnail_url, product_url,
+                        free_shipping, installments_without_interest, gender,
+                        thumbnail_url, product_url,
                         category_id, badge_id, marketplace_id,
                         first_seen_at, last_seen_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     (
                         product_id,
@@ -883,6 +904,7 @@ class SQLiteFallback:
                         product.review_count,
                         int(product.free_shipping),
                         int(product.installments_without_interest),
+                        product.gender,
                         product.image_url,
                         product.url,
                         category_id,
@@ -977,9 +999,9 @@ class SQLiteFallback:
                             title=?, current_price=?, original_price=?,
                             pix_price=?, discount_percent=?,
                             rating_stars=?, rating_count=?,
-                            free_shipping=?, installments_without_interest=?, thumbnail_url=?,
-                            product_url=?, category_id=?, badge_id=?, marketplace_id=?,
-                            first_seen_at=?, last_seen_at=?, synced=0
+                            free_shipping=?, installments_without_interest=?, gender=?,
+                            thumbnail_url=?, product_url=?, category_id=?, badge_id=?,
+                            marketplace_id=?, first_seen_at=?, last_seen_at=?, synced=0
                         WHERE ml_id=?
                         """,
                         (
@@ -992,6 +1014,7 @@ class SQLiteFallback:
                             p.review_count,
                             int(p.free_shipping),
                             int(p.installments_without_interest),
+                            p.gender,
                             p.image_url,
                             p.url,
                             c_id,
@@ -1011,11 +1034,11 @@ class SQLiteFallback:
                             id, ml_id, title, current_price,
                             original_price, pix_price, discount_percent,
                             rating_stars, rating_count,
-                            free_shipping, installments_without_interest, thumbnail_url,
-                            product_url, category_id, badge_id, marketplace_id,
-                            first_seen_at, last_seen_at
+                            free_shipping, installments_without_interest, gender,
+                            thumbnail_url, product_url, category_id, badge_id,
+                            marketplace_id, first_seen_at, last_seen_at
                         ) VALUES (
-                            ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                            ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                         )
                         """,
                         (
@@ -1030,6 +1053,7 @@ class SQLiteFallback:
                             p.review_count,
                             int(p.free_shipping),
                             int(p.installments_without_interest),
+                            p.gender,
                             p.image_url,
                             p.url,
                             c_id,
@@ -1634,10 +1658,11 @@ class SQLiteFallback:
                         fail_ids.extend(chunk_ids)
                 except Exception as exc:
                     exc_str = str(exc)
-                    # Erro 23505: pkey já existe no Supabase — row foi sincronizada
-                    # anteriormente mas synced=0 não foi resetado (ex: falha no
-                    # commit SQLite após upsert bem-sucedido). Marca como synced.
-                    if "23505" in exc_str:
+                    # 23505: pkey já existe — row sincronizada anteriormente.
+                    # 23503: FK violation — dados já existem no Supabase com
+                    # UUIDs diferentes (SQLite gerou UUIDs locais antes do
+                    # sync de lookup tables). Marca como synced em ambos.
+                    if "23505" in exc_str or "23503" in exc_str:
                         logger.debug(
                             f"sync_{table}_chunk_already_exists",
                             chunk_start=i,

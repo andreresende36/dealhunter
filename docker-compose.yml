@@ -46,6 +46,7 @@ services:
     env_file: .env
     volumes:
       - crivo_data:/app/data
+      - ./data/ml_main_categories_all_items.json:/app/data/ml_main_categories_all_items.json:ro
       - ./src:/app/src:ro
       - ./logs:/app/logs
     networks:
@@ -78,6 +79,7 @@ services:
     env_file: .env
     volumes:
       - crivo_data:/app/data
+      - ./data/ml_main_categories_all_items.json:/app/data/ml_main_categories_all_items.json:ro
       - ./src:/app/src:ro
       - ./logs:/app/logs
     networks:
@@ -112,6 +114,7 @@ services:
       - "8000:8000"
     volumes:
       - crivo_data:/app/data
+      - ./data/ml_main_categories_all_items.json:/app/data/ml_main_categories_all_items.json:ro
       - ./src:/app/src:ro
       - ./logs:/app/logs
     networks:

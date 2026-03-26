@@ -57,9 +57,12 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt && \
     playwright install chromium
 
-# Copia código-fonte e prompts
+# Copia código-fonte, prompts e dados de referência estáticos
+# NOTA: ml_categories.json vai para /app/ (ROOT_DIR) — não /app/data/ (volume)
+#       ml_main_categories_all_items.json é montado via bind mount no compose
 COPY src/ ./src/
 COPY prompts/ ./prompts/
+COPY data/ml_categories.json ./
 
 # Cria diretórios de dados e logs, configura usuário não-root
 RUN mkdir -p /app/data /app/logs && \

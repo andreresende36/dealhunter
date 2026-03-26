@@ -9,6 +9,7 @@ from src.config import settings
 from src.utils.prompts_loader import load_prompt
 
 _CLASSIFIER_USER_TEMPLATE = load_prompt("classifier_user")
+_GENDER_USER_TEMPLATE = load_prompt("gender_user")
 
 logger = structlog.get_logger(__name__)
 
@@ -439,6 +440,125 @@ KEYWORDS_MAP = {
         "nikon",
     ],
 }
+
+
+# ---------------------------------------------------------------------------
+# Classificação de gênero
+# ---------------------------------------------------------------------------
+
+# Categorias onde faz sentido classificar gênero
+GENDER_RELEVANT_CATEGORIES = {
+    "Calçados, Roupas e Bolsas",
+    "Esportes e Fitness",
+    "Joias e Relógios",
+    "Beleza e Cuidado Pessoal",
+    "Brinquedos e Hobbies",
+}
+
+# Keywords que determinam gênero de forma explícita no título
+_GENDER_KEYWORDS: dict[str, list[str]] = {
+    "Feminino": [
+        "feminino", "feminina", "femininos", "femininas",
+        "mulher", "mulheres", "feminil",
+        "menina", "meninas",
+        "plus size",
+        "calcinha", "sutiã", "lingerie",
+        "saia", "vestido", "blusa",
+        "feminino adulto",
+    ],
+    "Masculino": [
+        "masculino", "masculina", "masculinos", "masculinas",
+        "homem", "homens", "masculil",
+        "menino", "meninos",
+        "cueca", "bermuda masculina",
+        "masculino adulto",
+    ],
+    "Unissex": [
+        "unissex", "unisex",
+    ],
+}
+
+# Pré-compila os padrões de gênero
+_GENDER_PATTERNS: list[tuple[str, re.Pattern]] = [
+    (
+        gender,
+        re.compile(
+            r"\b(" + "|".join(re.escape(w) for w in words) + r")\b",
+            re.IGNORECASE,
+        ),
+    )
+    for gender, words in _GENDER_KEYWORDS.items()
+]
+
+_VALID_GENDERS = {"Masculino", "Feminino", "Unissex", "Sem gênero"}
+
+
+def get_product_gender(title: str, category: str) -> str | None:
+    """
+    Classifica o gênero de um produto por keywords.
+
+    Retorna:
+    - "Sem gênero"  se a categoria não é gender-relevant
+    - "Feminino" | "Masculino" | "Unissex"  se keyword encontrada
+    - None  se categoria é relevant mas não há keyword (precisa de IA)
+    """
+    if category not in GENDER_RELEVANT_CATEGORIES:
+        return "Sem gênero"
+
+    for gender, pattern in _GENDER_PATTERNS:
+        if pattern.search(title):
+            return gender
+
+    return None  # incerto — cabe à IA decidir
+
+
+async def classify_gender_with_ai(title: str) -> str:
+    """
+    Classifica o gênero de um produto via LLM (google/gemini-2.5-flash).
+    Chamado apenas quando keywords não determinaram o gênero.
+    Retorna um dos 4 valores válidos; fallback = "Unissex".
+    """
+    api_key = settings.openrouter.api_key
+    if not api_key:
+        logger.warning("openrouter_key_missing_gender", title=title)
+        return "Unissex"
+
+    prompt = _GENDER_USER_TEMPLATE.format(title=title)
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://crivo.ai",
+                    "X-Title": "Crivo",
+                },
+                json={
+                    "model": "google/gemini-2.5-flash",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.0,
+                    "max_tokens": 15,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            raw = data["choices"][0]["message"]["content"]
+            if not raw:
+                return "Unissex"
+            answer = raw.strip()
+
+            for valid in _VALID_GENDERS:
+                if valid.lower() == answer.lower() or answer.lower().startswith(valid.lower()):
+                    return valid
+
+            logger.warning("ai_gender_mismatch", title=title, ai_answer=answer)
+            return "Unissex"
+
+    except Exception as e:
+        logger.error("ai_gender_error", error=str(e), title=title)
+        return "Unissex"
 
 
 class ProductClassifier:

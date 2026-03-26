@@ -1011,6 +1011,7 @@ class SupabaseClient:
             "rating_count": product.review_count,
             "free_shipping": product.free_shipping,
             "installments_without_interest": product.installments_without_interest,
+            "gender": product.gender,
             "thumbnail_url": product.image_url,
             "product_url": product.url,
             "category_id": category_id,

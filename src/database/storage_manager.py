@@ -896,16 +896,21 @@ class StorageManager:
         """Salva multiplos affiliate links em ambos os bancos."""
         if not links:
             return []
-        local_ids = await self._sqlite.save_affiliate_links_batch(links)
+        result_ids: list[str] = []
         if self._using_supabase:
             try:
-                remote_ids = await self._supabase.save_affiliate_links_batch(links)
-                return remote_ids or local_ids
+                result_ids = await self._supabase.save_affiliate_links_batch(links)
             except SupabaseError as exc:
                 logger.warning(
                     "supabase_save_affiliate_links_batch_failed", error=str(exc)
                 )
-        return local_ids
+        try:
+            local_ids = await self._sqlite.save_affiliate_links_batch(links)
+            if not result_ids:
+                result_ids = local_ids
+        except Exception as exc:
+            logger.warning("sqlite_save_affiliate_links_batch_failed", error=str(exc))
+        return result_ids
 
     # ------------------------------------------------------------------
     # Image Worker

@@ -107,6 +107,7 @@ class ScrapedProduct:
     free_shipping: bool = False
     installments_without_interest: bool = False
     badge: str = ""  # Ex: "Oferta do dia", "Mais vendido"
+    gender: str = "Sem gênero"  # Masculino | Feminino | Unissex | Sem gênero
 
     # Controle interno
     scraped_at: float = field(default_factory=time.time)
@@ -136,6 +137,7 @@ class ScrapedProduct:
             "free_shipping": self.free_shipping,
             "installments_without_interest": self.installments_without_interest,
             "badge": self.badge,
+            "gender": self.gender,
             "scraped_at": self.scraped_at,
             "source": self.source,
             "marketplace": self.marketplace,

@@ -1,6 +1,6 @@
 -- =============================================================================
 -- Crivo — Schema PostgreSQL (Supabase)
--- Snapshot do schema final após todas as migrations (001–018).
+-- Snapshot do schema final após todas as migrations (001–020).
 -- Este arquivo é documentação de referência — NÃO execute diretamente em produção.
 -- Use as migrations em supabase/migrations/ para alterações incrementais.
 -- =============================================================================
@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS products (
     badge_id                      UUID        REFERENCES badges(id),
     marketplace_id                UUID        REFERENCES marketplaces(id),
     installments_without_interest BOOLEAN     DEFAULT FALSE,
+    gender                        TEXT        DEFAULT 'Sem gênero',
     enhanced_image_url            TEXT,
     image_status                  TEXT        DEFAULT 'pending',
     first_seen_at                 TIMESTAMPTZ DEFAULT NOW(),

@@ -1,0 +1,9 @@
+Classify the gender target of the following product. Respond with ONLY one of the exact options below, without any extra text or quotes.
+
+Product Title: {title}
+
+Options:
+- Masculino
+- Feminino
+- Unissex
+- Sem gênero
