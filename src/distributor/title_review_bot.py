@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import uuid
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 import structlog
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update

@@ -22,6 +22,8 @@ Uso:
 
 from __future__ import annotations
 
+from typing import Any
+
 import structlog
 
 from src.config import settings

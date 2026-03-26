@@ -623,6 +623,7 @@ def get_product_category(title: str) -> str:
     """Convenience function mapped to shared classifier."""
     return classifier_instance.classify(title)
 
+
 async def classify_with_ai(title: str) -> str:
     """
     Classifies a product using OpenRouter LLM (google/gemini-2.5-flash).

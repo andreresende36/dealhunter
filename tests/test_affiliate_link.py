@@ -14,12 +14,10 @@ import os
 import re
 import sys
 import urllib.request
-from urllib.parse import parse_qs, urlparse
+
 
 # Garante que src/ está no path ao rodar standalone
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-from src.distributor.affiliate_links import AffiliateLinkBuilder
 
 # URL de produto real para o teste HTTP (produto barato/qualquer)
 SAMPLE_URL = (

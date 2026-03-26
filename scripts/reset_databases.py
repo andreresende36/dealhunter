@@ -16,10 +16,9 @@ from pathlib import Path
 # Adiciona src/ ao path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.config import settings
-from src.database.sqlite_fallback import SQLiteFallback
-from src.database.supabase_client import SupabaseClient
-import structlog
+from src.config import settings  # noqa: E402
+from src.database.supabase_client import SupabaseClient  # noqa: E402
+import structlog  # noqa: E402
 
 logger = structlog.get_logger(__name__)
 

@@ -15,7 +15,7 @@ Fluxo:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, TypedDict
+from typing import Any, TYPE_CHECKING, TypedDict
 
 import structlog
 

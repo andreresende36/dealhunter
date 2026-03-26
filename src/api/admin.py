@@ -323,7 +323,7 @@ async def analytics_daily(
 ):
     """Métricas diárias para gráficos trend."""
     async with StorageManager() as storage:
-        data = _call_rpc(storage,"fn_daily_metrics", {"days_back": days})
+        data = _call_rpc(storage, "fn_daily_metrics", {"days_back": days})
     return {"data": data}
 
 
@@ -333,7 +333,7 @@ async def analytics_hourly(
 ):
     """Envios por hora de hoje."""
     async with StorageManager() as storage:
-        data = _call_rpc(storage,"fn_hourly_sends", {})
+        data = _call_rpc(storage, "fn_hourly_sends", {})
     return {"data": data}
 
 
@@ -344,7 +344,7 @@ async def analytics_funnel(
 ):
     """Funil de conversão."""
     async with StorageManager() as storage:
-        data = _call_rpc(storage,"fn_conversion_funnel", {"hours_back": hours})
+        data = _call_rpc(storage, "fn_conversion_funnel", {"hours_back": hours})
     return {"data": data}
 
 

@@ -11,17 +11,13 @@ Cobre:
 - Validacao de pesos (warning quando soma != 100)
 """
 
-import math
 from unittest.mock import patch
 
 import pytest
 
 from src.scraper.base_scraper import ScrapedProduct
 from src.analyzer.score_engine import (
-    CriterionScore,
-    ScoreBreakdown,
     ScoreEngine,
-    ScoredProduct,
 )
 from src.analyzer.fake_discount_detector import FakeDiscountDetector
 

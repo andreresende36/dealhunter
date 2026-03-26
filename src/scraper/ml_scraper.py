@@ -617,6 +617,18 @@ class MLScraper(BaseScraper):
 
         return products
 
+    def _resolve_tracking_url(self, url: str) -> str:
+        """Extrai a URL real de tracking URLs do MercadoLivre (mclics/...)."""
+        if "click1.mercadolivre" in url or "/mclics/" in url:
+            from urllib.parse import parse_qs, urlparse, unquote
+
+            parsed = urlparse(url)
+            params = parse_qs(parsed.query)
+            real_url = params.get("url", [None])[0]
+            if real_url:
+                return unquote(real_url)
+        return url
+
     def _parse_free_shipping(self, item: Tag) -> bool:
         tag = item.select_one(SELECTORS["shipping"])
         if tag:
@@ -657,6 +669,8 @@ class MLScraper(BaseScraper):
             ml_id = self._extract_ml_id(url)
             if not ml_id:
                 return None
+
+            url = self._resolve_tracking_url(url)
 
             if url.startswith("/"):
                 url = self.full_url(url)
