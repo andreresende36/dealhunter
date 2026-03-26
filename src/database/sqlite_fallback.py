@@ -214,8 +214,6 @@ class SQLiteFallback:
         CREATE INDEX IF NOT EXISTS idx_so_status ON scored_offers(status);
         CREATE INDEX IF NOT EXISTS idx_so_score
             ON scored_offers(final_score DESC);
-        CREATE INDEX IF NOT EXISTS idx_so_queue_priority
-            ON scored_offers(queue_priority DESC);
         CREATE INDEX IF NOT EXISTS idx_so_synced ON scored_offers(synced);
 
         CREATE INDEX IF NOT EXISTS idx_se_scored
