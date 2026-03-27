@@ -48,12 +48,17 @@ class UnsentOfferRow(TypedDict):
     original_price: float | None
     pix_price: float | None
     discount_percent: float
+    discount_type: str | None
     rating_stars: float | None
     rating_count: int | None
     category: str | None
     thumbnail_url: str | None
     free_shipping: bool
+    full_shipping: bool
+    brand: str | None
     installments_without_interest: bool
+    installment_count: int | None
+    installment_value: float | None
     badge: str | None
     final_score: int
 
@@ -76,6 +81,8 @@ def _offer_to_product(offer: UnsentOfferRow) -> ScrapedProduct:
     """Converte a linha da view vw_approved_unsent em ScrapedProduct."""
     pix_price_raw = offer.get("pix_price")
     orig_price_raw = offer.get("original_price")
+    inst_value_raw = offer.get("installment_value")
+    inst_count_raw = offer.get("installment_count")
     return ScrapedProduct(
         ml_id=offer["ml_id"],
         url=offer["product_url"],
@@ -86,13 +93,20 @@ def _offer_to_product(offer: UnsentOfferRow) -> ScrapedProduct:
         ),
         pix_price=_safe_number(pix_price_raw) if pix_price_raw else None,
         discount_pct=_safe_number(offer.get("discount_percent")),
+        discount_type=offer.get("discount_type") or "",
         rating=_safe_number(offer.get("rating_stars")),
         review_count=int(_safe_number(offer.get("rating_count"))),
         category=offer.get("category") or "",
         image_url=offer.get("thumbnail_url") or "",
         free_shipping=bool(offer.get("free_shipping", False)),
+        full_shipping=bool(offer.get("full_shipping", False)),
+        brand=offer.get("brand") or "",
         installments_without_interest=bool(
             offer.get("installments_without_interest", False)
+        ),
+        installment_count=int(inst_count_raw) if inst_count_raw else None,
+        installment_value=(
+            float(inst_value_raw) if inst_value_raw else None
         ),
         badge=offer.get("badge") or "",
     )

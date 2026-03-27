@@ -122,6 +122,15 @@ SELECTORS = {
     "installments": ".poly-price__installments",
     # Badges
     "badge": "span.poly-component__highlight",
+    # Marca
+    "brand": ".poly-component__brand",
+    # FULL shipping icon
+    "full_shipping_icon": "svg.poly-shipping__promise-icon--full",
+    # Variações disponíveis
+    "variations": ".poly-component__variations-text",
+    # Desconto — variantes específicas
+    "discount_standard": ".poly-price__disc--pill",
+    "discount_pix": ".poly-price__disc_label",
     # Paginação (link-based)
     "next_page": (
         "a.andes-pagination__link--next, li.andes-pagination__button--next a"
@@ -420,6 +429,7 @@ class MLScraper(BaseScraper):
                         "product_id": ids[p.ml_id],
                         "price": p.price,
                         "original_price": p.original_price,
+                        "pix_price": p.pix_price,
                     }
                     for p in new_products
                     if p.ml_id in ids
@@ -634,14 +644,114 @@ class MLScraper(BaseScraper):
         if tag:
             text = tag.get_text(strip=True).lower()
             return "grátis" in text or "gratis" in text
+        # FULL icon sem texto também implica frete grátis
+        if item.select_one(SELECTORS["full_shipping_icon"]):
+            return True
         return False
 
-    def _parse_installments(self, item: Tag) -> bool:
+    def _parse_full_shipping(self, item: Tag) -> bool:
+        """Detecta se o produto é enviado pelo FULL (fulfillment ML)."""
+        icon = item.select_one(SELECTORS["full_shipping_icon"])
+        return icon is not None
+
+    def _parse_brand(self, item: Tag) -> str:
+        """Extrai a marca do card (.poly-component__brand)."""
+        tag = item.select_one(SELECTORS["brand"])
+        return tag.get_text(strip=True) if tag else ""
+
+    def _parse_variations(self, item: Tag) -> str:
+        """Extrai texto de variações disponíveis (.poly-component__variations-text)."""
+        tag = item.select_one(SELECTORS["variations"])
+        return tag.get_text(strip=True) if tag else ""
+
+    def _parse_installments(
+        self, item: Tag
+    ) -> tuple[bool, int | None, float | None]:
+        """Extrai dados completos de parcelamento.
+
+        Retorna (sem_juros, count, value_per_installment).
+
+        Padrões identificados:
+          A: "12x R$ 192,14"                              → (False, 12, 192.14)
+          B: "10x R$ 107,90 sem juros"                    → (True, 10, 107.90)
+          C: "ou R$ 687,78 em 10x R$ 68,78 sem juros"    → (True, 10, 68.78)
+          D: "ou R$ 357,90 em outros meios"               → (False, None, None)
+        """
         tag = item.select_one(SELECTORS["installments"])
-        if tag:
-            text = tag.get_text(strip=True).lower()
-            return "sem juros" in text or "sin interés" in text
-        return False
+        if not tag:
+            return False, None, None
+
+        text = tag.get_text(separator=" ", strip=True).lower()
+        sem_juros = "sem juros" in text or "sin interés" in text
+
+        # Padrão D: sem parcelas reais
+        if "em outros meios" in text:
+            return False, None, None
+
+        # Extrair count: procurar NNx
+        count_match = re.search(r"(\d+)\s*x\b", text)
+        if not count_match:
+            return sem_juros, None, None
+
+        count = int(count_match.group(1))
+
+        # Extrair valor da parcela: último andes-money-amount.poly-phrase-price
+        # após o "Nx" (para evitar pegar o preço total no Padrão C)
+        phrase_prices = tag.select("span.andes-money-amount.poly-phrase-price")
+        if phrase_prices:
+            # No Padrão C há 2+ spans: o último é o valor da parcela
+            last_price = phrase_prices[-1]
+            value = self._price_from_andes(last_price)
+            return sem_juros, count, value
+
+        # Fallback: regex no texto
+        # Procurar valores após "Nx" no texto
+        value_match = re.search(
+            r"\d+\s*x\s*(?:r\$\s*)?([\d.]+[,]\d{2})", text
+        )
+        if value_match:
+            value = self._clean_price(value_match.group(1))
+            return sem_juros, count, value
+
+        return sem_juros, count, None
+
+    def _parse_discount(self, item: Tag) -> tuple[float, str]:
+        """Extrai percentual e tipo de desconto.
+
+        Retorna (pct, type):
+          - type="standard": desconto padrão (pill, ex: "20% OFF")
+          - type="pix": desconto de meio de pagamento (ex: "22% OFF no Pix")
+          - type="": sem desconto explícito
+        """
+        # 1. Desconto padrão (pill)
+        pill = item.select_one(SELECTORS["discount_standard"])
+        if pill:
+            text = pill.get_text(strip=True)
+            pct = self._parse_discount_pct(text)
+            if pct:
+                return pct, "standard"
+
+        # 2. Desconto Pix/boleto (label inline)
+        pix_label = item.select_one(SELECTORS["discount_pix"])
+        if pix_label:
+            text = pix_label.get_text(strip=True)
+            pct = self._parse_discount_pct(text)
+            if pct:
+                return pct, "pix"
+
+        # 3. Fallback: seletor amplo original
+        discount_tag = item.select_one(SELECTORS["discount"])
+        if discount_tag:
+            text = discount_tag.get_text(strip=True)
+            pct = self._parse_discount_pct(text)
+            if pct:
+                discount_text_lower = text.lower()
+                dtype = "pix" if any(
+                    kw in discount_text_lower for kw in ("pix", "boleto")
+                ) else "standard"
+                return pct, dtype
+
+        return 0.0, ""
 
     def _parse_image_url(self, item: Tag) -> str:
         img_tag = item.select_one(SELECTORS["image"])
@@ -689,10 +799,8 @@ class MLScraper(BaseScraper):
             # --- Preço original (riscado) ---
             original_price = self._get_original_price(item)
 
-            # --- Desconto explícito ---
-            discount_tag = item.select_one(SELECTORS["discount"])
-            discount_text = discount_tag.get_text(strip=True) if discount_tag else ""
-            explicit_discount = self._parse_discount_pct(discount_text)
+            # --- Desconto explícito (com tipo) ---
+            explicit_discount, discount_type = self._parse_discount(item)
 
             # --- Avaliação ---
             rating = self._parse_rating(item)
@@ -703,8 +811,11 @@ class MLScraper(BaseScraper):
             # --- Frete grátis ---
             free_shipping = self._parse_free_shipping(item)
 
-            # --- Parcelamento sem juros ---
-            installments_without_interest = self._parse_installments(item)
+            # --- FULL shipping ---
+            full_shipping = self._parse_full_shipping(item)
+
+            # --- Parcelamento (completo) ---
+            sem_juros, inst_count, inst_value = self._parse_installments(item)
 
             # --- Imagem ---
             image_url = self._parse_image_url(item)
@@ -712,6 +823,12 @@ class MLScraper(BaseScraper):
             # --- Badge ---
             badge_tag = item.select_one(SELECTORS["badge"])
             badge = badge_tag.get_text(strip=True) if badge_tag else ""
+
+            # --- Marca ---
+            brand = self._parse_brand(item)
+
+            # --- Variações ---
+            variations = self._parse_variations(item)
 
             # --- Montar produto ---
             product = ScrapedProduct(
@@ -726,8 +843,14 @@ class MLScraper(BaseScraper):
                 category=get_product_category(title),
                 image_url=image_url,
                 free_shipping=free_shipping,
-                installments_without_interest=installments_without_interest,
+                full_shipping=full_shipping,
+                installments_without_interest=sem_juros,
+                installment_count=inst_count,
+                installment_value=inst_value,
                 badge=badge,
+                brand=brand,
+                variations=variations,
+                discount_type=discount_type,
                 source=source.name,
             )
 

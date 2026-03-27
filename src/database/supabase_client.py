@@ -349,6 +349,7 @@ class SupabaseClient:
                 "product_id": e["product_id"],
                 "price": e["price"],
                 "original_price": e["original_price"],
+                "pix_price": e.get("pix_price"),
                 "recorded_at": now,
             }
             for e in entries
@@ -384,6 +385,7 @@ class SupabaseClient:
         product_id: str,
         price: float,
         original_price: Optional[float] = None,
+        pix_price: Optional[float] = None,
     ) -> bool:
         """
         Registra o preço atual de um produto no histórico.
@@ -393,11 +395,13 @@ class SupabaseClient:
             product_id: UUID interno do produto (retornado por upsert_product)
             price: Preço atual em BRL
             original_price: Preço original antes do desconto (pode ser None)
+            pix_price: Preço com desconto Pix/boleto (pode ser None)
         """
         data = {
             "product_id": product_id,
             "price": price,
             "original_price": original_price,
+            "pix_price": pix_price,
             "recorded_at": datetime.now(tz=timezone.utc).isoformat(),
         }
         try:
@@ -1010,7 +1014,13 @@ class SupabaseClient:
             "rating_stars": product.rating,
             "rating_count": product.review_count,
             "free_shipping": product.free_shipping,
+            "full_shipping": product.full_shipping,
             "installments_without_interest": product.installments_without_interest,
+            "installment_count": product.installment_count,
+            "installment_value": product.installment_value,
+            "brand": product.brand,
+            "variations": product.variations,
+            "discount_type": product.discount_type,
             "gender": product.gender,
             "thumbnail_url": product.image_url,
             "product_url": product.url,

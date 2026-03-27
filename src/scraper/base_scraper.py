@@ -105,8 +105,14 @@ class ScrapedProduct:
     category: str = ""
     image_url: str = ""
     free_shipping: bool = False
+    full_shipping: bool = False  # Enviado pelo FULL (fulfilled by ML)
     installments_without_interest: bool = False
+    installment_count: Optional[int] = None  # Nº máximo de parcelas (ex: 10, 12)
+    installment_value: Optional[float] = None  # Valor por parcela em BRL
     badge: str = ""  # Ex: "Oferta do dia", "Mais vendido"
+    brand: str = ""  # Marca extraída do card (ex: "GROWTH SUPPLEMENTS")
+    variations: str = ""  # Texto de variações (ex: "Disponível em 6 cores")
+    discount_type: str = ""  # "standard" | "pix" | ""
     gender: str = "Sem gênero"  # Masculino | Feminino | Unissex | Sem gênero
 
     # Controle interno
@@ -135,8 +141,14 @@ class ScrapedProduct:
             "category": self.category,
             "image_url": self.image_url,
             "free_shipping": self.free_shipping,
+            "full_shipping": self.full_shipping,
             "installments_without_interest": self.installments_without_interest,
+            "installment_count": self.installment_count,
+            "installment_value": self.installment_value,
             "badge": self.badge,
+            "brand": self.brand,
+            "variations": self.variations,
+            "discount_type": self.discount_type,
             "gender": self.gender,
             "scraped_at": self.scraped_at,
             "source": self.source,

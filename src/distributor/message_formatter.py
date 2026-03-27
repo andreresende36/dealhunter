@@ -303,11 +303,16 @@ class MessageFormatter:
     # ------------------------------------------------------------------
 
     def _build_payment_suffix(self, product: ScrapedProduct) -> str:
-        """Retorna sufixo de pagamento: ' no pix', ' em Nx', ou vazio."""
+        """Retorna sufixo de pagamento: ' no pix', ' em Nx de R$ Y', ou vazio."""
         if product.pix_price and product.pix_price < product.price:
             return " no pix"
+        if product.installments_without_interest and product.installment_count:
+            if product.installment_value:
+                value_str = self._format_price(product.installment_value)
+                return f" em {product.installment_count}x de R$ {value_str}"
+            return f" em {product.installment_count}x sem juros"
         if product.installments_without_interest:
-            return " em 10x"
+            return " em 10x sem juros"  # fallback para dados legados
         return ""
 
     def _build_rating_line(self, product: ScrapedProduct) -> str:

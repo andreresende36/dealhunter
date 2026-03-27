@@ -93,6 +93,7 @@ async def _filter_products(
                     "product_id": ids[p.ml_id],
                     "price": p.price,
                     "original_price": p.original_price,
+                    "pix_price": p.pix_price,
                 }
                 for p in dedup
                 if p.ml_id in ids
@@ -237,6 +238,7 @@ async def _save_approved(
                     "product_id": ids[p.ml_id],
                     "price": p.price,
                     "original_price": p.original_price,
+                    "pix_price": p.pix_price,
                 }
                 for p in approved_products
                 if p.ml_id in ids

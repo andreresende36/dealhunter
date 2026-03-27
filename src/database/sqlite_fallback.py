@@ -138,7 +138,13 @@ class SQLiteFallback:
             rating_stars      REAL DEFAULT 0,
             rating_count      INTEGER DEFAULT 0,
             free_shipping     INTEGER DEFAULT 0,
+            full_shipping     INTEGER DEFAULT 0,
             installments_without_interest INTEGER DEFAULT 0,
+            installment_count INTEGER,
+            installment_value REAL,
+            brand             TEXT DEFAULT '',
+            variations        TEXT DEFAULT '',
+            discount_type     TEXT DEFAULT '',
             gender            TEXT DEFAULT 'Sem gênero',
             thumbnail_url     TEXT DEFAULT '',
             product_url       TEXT DEFAULT '',
@@ -159,6 +165,7 @@ class SQLiteFallback:
                                REFERENCES products(id) ON DELETE CASCADE,
             price          REAL NOT NULL,
             original_price REAL,
+            pix_price      REAL,
             recorded_at    TEXT DEFAULT (datetime('now')),
             synced         INTEGER DEFAULT 0
         );
@@ -400,9 +407,29 @@ class SQLiteFallback:
         except Exception:
             pass  # Coluna já removida ou nunca existiu
 
+        # Migrações incrementais — migration 021 (brand, installments, FULL, etc.)
+        for col, definition in [
+            ("brand", "TEXT DEFAULT ''"),
+            ("full_shipping", "INTEGER DEFAULT 0"),
+            ("variations", "TEXT DEFAULT ''"),
+            ("installment_count", "INTEGER"),
+            ("installment_value", "REAL"),
+            ("discount_type", "TEXT DEFAULT ''"),
+        ]:
+            try:
+                await self._db.execute(f"ALTER TABLE products ADD COLUMN {col} {definition}")
+                await self._db.commit()
+            except Exception:
+                pass  # Coluna já existe
+
+        try:
+            await self._db.execute("ALTER TABLE price_history ADD COLUMN pix_price REAL")
+            await self._db.commit()
+        except Exception:
+            pass  # Coluna já existe
+
         # Views — recriadas sempre APÓS todas as migrações incrementais para garantir
-        # que as colunas referenciadas (queue_priority, score_override, admin_notes)
-        # já existam em bancos previamente criados.
+        # que as colunas referenciadas já existam em bancos previamente criados.
         await self._db.executescript("""
         DROP VIEW IF EXISTS vw_approved_unsent;
         CREATE VIEW vw_approved_unsent AS
@@ -414,12 +441,17 @@ class SQLiteFallback:
             p.original_price,
             p.pix_price,
             p.discount_percent,
+            p.discount_type,
             p.free_shipping,
+            p.full_shipping,
+            p.brand,
             p.thumbnail_url,
             p.product_url,
             p.rating_stars,
             p.rating_count,
             p.installments_without_interest,
+            p.installment_count,
+            p.installment_value,
             c.name          AS category,
             b.name          AS badge,
             so.id           AS scored_offer_id,
@@ -852,7 +884,10 @@ class SQLiteFallback:
                         title=?, current_price=?, original_price=?,
                         pix_price=?, discount_percent=?,
                         rating_stars=?, rating_count=?,
-                        free_shipping=?, installments_without_interest=?, gender=?,
+                        free_shipping=?, full_shipping=?,
+                        installments_without_interest=?,
+                        installment_count=?, installment_value=?,
+                        brand=?, variations=?, discount_type=?, gender=?,
                         thumbnail_url=?, product_url=?, category_id=?, badge_id=?,
                         marketplace_id=?, first_seen_at=?, last_seen_at=?, synced=0
                     WHERE ml_id=?
@@ -866,7 +901,13 @@ class SQLiteFallback:
                         product.rating,
                         product.review_count,
                         int(product.free_shipping),
+                        int(product.full_shipping),
                         int(product.installments_without_interest),
+                        product.installment_count,
+                        product.installment_value,
+                        product.brand,
+                        product.variations,
+                        product.discount_type,
                         product.gender,
                         product.image_url,
                         product.url,
@@ -886,11 +927,14 @@ class SQLiteFallback:
                         id, ml_id, title, current_price, original_price,
                         pix_price, discount_percent,
                         rating_stars, rating_count,
-                        free_shipping, installments_without_interest, gender,
+                        free_shipping, full_shipping,
+                        installments_without_interest,
+                        installment_count, installment_value,
+                        brand, variations, discount_type, gender,
                         thumbnail_url, product_url,
                         category_id, badge_id, marketplace_id,
                         first_seen_at, last_seen_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     (
                         product_id,
@@ -903,7 +947,13 @@ class SQLiteFallback:
                         product.rating,
                         product.review_count,
                         int(product.free_shipping),
+                        int(product.full_shipping),
                         int(product.installments_without_interest),
+                        product.installment_count,
+                        product.installment_value,
+                        product.brand,
+                        product.variations,
+                        product.discount_type,
                         product.gender,
                         product.image_url,
                         product.url,
@@ -999,7 +1049,10 @@ class SQLiteFallback:
                             title=?, current_price=?, original_price=?,
                             pix_price=?, discount_percent=?,
                             rating_stars=?, rating_count=?,
-                            free_shipping=?, installments_without_interest=?, gender=?,
+                            free_shipping=?, full_shipping=?,
+                            installments_without_interest=?,
+                            installment_count=?, installment_value=?,
+                            brand=?, variations=?, discount_type=?, gender=?,
                             thumbnail_url=?, product_url=?, category_id=?, badge_id=?,
                             marketplace_id=?, first_seen_at=?, last_seen_at=?, synced=0
                         WHERE ml_id=?
@@ -1013,7 +1066,13 @@ class SQLiteFallback:
                             p.rating,
                             p.review_count,
                             int(p.free_shipping),
+                            int(p.full_shipping),
                             int(p.installments_without_interest),
+                            p.installment_count,
+                            p.installment_value,
+                            p.brand,
+                            p.variations,
+                            p.discount_type,
                             p.gender,
                             p.image_url,
                             p.url,
@@ -1034,11 +1093,14 @@ class SQLiteFallback:
                             id, ml_id, title, current_price,
                             original_price, pix_price, discount_percent,
                             rating_stars, rating_count,
-                            free_shipping, installments_without_interest, gender,
+                            free_shipping, full_shipping,
+                            installments_without_interest,
+                            installment_count, installment_value,
+                            brand, variations, discount_type, gender,
                             thumbnail_url, product_url, category_id, badge_id,
                             marketplace_id, first_seen_at, last_seen_at
                         ) VALUES (
-                            ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+                            ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
                         )
                         """,
                         (
@@ -1052,7 +1114,13 @@ class SQLiteFallback:
                             p.rating,
                             p.review_count,
                             int(p.free_shipping),
+                            int(p.full_shipping),
                             int(p.installments_without_interest),
+                            p.installment_count,
+                            p.installment_value,
+                            p.brand,
+                            p.variations,
+                            p.discount_type,
                             p.gender,
                             p.image_url,
                             p.url,
@@ -1081,8 +1149,8 @@ class SQLiteFallback:
             await self._db.executemany(
                 """
                 INSERT INTO price_history
-                    (id, product_id, price, original_price, recorded_at)
-                VALUES (?,?,?,?,?)
+                    (id, product_id, price, original_price, pix_price, recorded_at)
+                VALUES (?,?,?,?,?,?)
                 """,
                 [
                     (
@@ -1090,6 +1158,7 @@ class SQLiteFallback:
                         e["product_id"],
                         e["price"],
                         e["original_price"],
+                        e.get("pix_price"),
                         now,
                     )
                     for e in entries
@@ -1185,6 +1254,7 @@ class SQLiteFallback:
         product_id: str,
         price: float,
         original_price: Optional[float] = None,
+        pix_price: Optional[float] = None,
     ) -> bool:
         """Registra o preço atual no histórico local."""
         now = datetime.now(tz=timezone.utc).isoformat()
@@ -1192,10 +1262,10 @@ class SQLiteFallback:
             await self._db.execute(
                 """
                 INSERT INTO price_history
-                    (id, product_id, price, original_price, recorded_at)
-                VALUES (?,?,?,?,?)
+                    (id, product_id, price, original_price, pix_price, recorded_at)
+                VALUES (?,?,?,?,?,?)
                 """,
-                (str(uuid.uuid4()), product_id, price, original_price, now),
+                (str(uuid.uuid4()), product_id, price, original_price, pix_price, now),
             )
             await self._db.commit()
             return True
