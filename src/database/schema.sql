@@ -1,8 +1,8 @@
 -- =============================================================================
 -- Crivo — Schema PostgreSQL (Supabase)
--- Snapshot do schema final após todas as migrations (001–020).
--- Este arquivo é documentação de referência — NÃO execute diretamente em produção.
--- Use as migrations em supabase/migrations/ para alterações incrementais.
+-- Snapshot do schema final após todas as migrations (001–032).
+-- Este arquivo é documentação de referência e criação do zero.
+-- Para alterações incrementais use supabase/migrations/.
 -- =============================================================================
 
 -- Extensões necessárias
@@ -10,68 +10,117 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";   -- uuid_generate_v4()
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";     -- busca textual fuzzy (opcional)
 
 -- =============================================================================
+-- Função reutilizável: auto-update updated_at
+-- =============================================================================
+CREATE OR REPLACE FUNCTION fn_set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- =============================================================================
 -- 1. badges
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS badges (
-    id          UUID    DEFAULT uuid_generate_v4() PRIMARY KEY,
-    name        TEXT    NOT NULL UNIQUE,
-    created_at  TIMESTAMPTZ DEFAULT NOW()
+    id          UUID        DEFAULT uuid_generate_v4() PRIMARY KEY,
+    name        TEXT        NOT NULL UNIQUE,
+    created_at  TIMESTAMPTZ DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE TRIGGER trigger_badges_updated_at
+    BEFORE UPDATE ON badges
+    FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
 
 -- =============================================================================
 -- 2. categories
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS categories (
-    id          UUID    DEFAULT uuid_generate_v4() PRIMARY KEY,
-    name        TEXT    NOT NULL UNIQUE,
-    created_at  TIMESTAMPTZ DEFAULT NOW()
+    id          UUID        DEFAULT uuid_generate_v4() PRIMARY KEY,
+    name        TEXT        NOT NULL UNIQUE,
+    created_at  TIMESTAMPTZ DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE TRIGGER trigger_categories_updated_at
+    BEFORE UPDATE ON categories
+    FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
 
 -- =============================================================================
 -- 3. marketplaces
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS marketplaces (
-    id          UUID    DEFAULT uuid_generate_v4() PRIMARY KEY,
-    name        TEXT    NOT NULL UNIQUE,
-    created_at  TIMESTAMPTZ DEFAULT NOW()
+    id          UUID        DEFAULT uuid_generate_v4() PRIMARY KEY,
+    name        TEXT        NOT NULL UNIQUE,
+    created_at  TIMESTAMPTZ DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TRIGGER trigger_marketplaces_updated_at
+    BEFORE UPDATE ON marketplaces
+    FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
+
 -- =============================================================================
--- 4. products
+-- 4. brands
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS brands (
+    id          UUID        DEFAULT uuid_generate_v4() PRIMARY KEY,
+    name        TEXT        NOT NULL UNIQUE,
+    created_at  TIMESTAMPTZ DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TRIGGER trigger_brands_updated_at
+    BEFORE UPDATE ON brands
+    FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
+
+-- =============================================================================
+-- 5. products
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS products (
-    id                            UUID        DEFAULT uuid_generate_v4() PRIMARY KEY,
-    ml_id                         TEXT        NOT NULL UNIQUE,
-    title                         TEXT        NOT NULL,
+    id                            UUID          DEFAULT uuid_generate_v4() PRIMARY KEY,
+    ml_id                         TEXT          NOT NULL UNIQUE,
+    title                         TEXT          NOT NULL,
     current_price                 DECIMAL(10,2) NOT NULL,
     original_price                DECIMAL(10,2),
     pix_price                     DECIMAL(10,2),
-    discount_percent              DECIMAL(4,1) DEFAULT 0,
-    rating_stars                  DECIMAL(3,1) DEFAULT 0,
-    rating_count                  INTEGER     DEFAULT 0,
-    free_shipping                 BOOLEAN     DEFAULT FALSE,
-    thumbnail_url                 TEXT        DEFAULT '',
-    product_url                   TEXT        NOT NULL DEFAULT '',
-    category_id                   UUID        REFERENCES categories(id),
-    badge_id                      UUID        REFERENCES badges(id),
-    marketplace_id                UUID        REFERENCES marketplaces(id),
-    installments_without_interest BOOLEAN     DEFAULT FALSE,
-    gender                        TEXT        DEFAULT 'Sem gênero',
-    enhanced_image_url            TEXT,
-    image_status                  TEXT        DEFAULT 'pending',
-    first_seen_at                 TIMESTAMPTZ DEFAULT NOW(),
-    last_seen_at                  TIMESTAMPTZ DEFAULT NOW(),
-    created_at                    TIMESTAMPTZ DEFAULT NOW()
+    discount_percent              DECIMAL(4,1)  DEFAULT 0,
+    rating_stars                  DECIMAL(3,1)  DEFAULT 0,
+    rating_count                  INTEGER       DEFAULT 0,
+    free_shipping                 BOOLEAN       DEFAULT FALSE,
+    full_shipping                 BOOLEAN       DEFAULT FALSE,
+    installments_without_interest BOOLEAN       DEFAULT FALSE,
+    installment_count             SMALLINT,
+    installment_value             DECIMAL(10,2),
+    brand_id                      UUID          REFERENCES brands(id),
+    variations                    JSONB,
+    discount_type                 TEXT          CONSTRAINT chk_products_discount_type
+                                                CHECK (discount_type IN ('standard', 'pix')),
+    gender                        TEXT          DEFAULT 'gender_neutral'
+                                                CONSTRAINT chk_products_gender
+                                                CHECK (gender IN ('male', 'female', 'unisex', 'gender_neutral')),
+    thumbnail_url                 TEXT          DEFAULT '',
+    product_url                   TEXT          NOT NULL DEFAULT '',
+    category_id                   UUID          REFERENCES categories(id),
+    badge_id                      UUID          REFERENCES badges(id),
+    marketplace_id                UUID          REFERENCES marketplaces(id),
+    first_seen_at                 TIMESTAMPTZ   DEFAULT NOW(),
+    last_seen_at                  TIMESTAMPTZ   DEFAULT NOW(),
+    created_at                    TIMESTAMPTZ   DEFAULT NOW(),
+    deleted_at                    TIMESTAMPTZ
 );
 
-CREATE INDEX IF NOT EXISTS idx_products_ml_id          ON products(ml_id);
-CREATE INDEX IF NOT EXISTS idx_products_discount       ON products(discount_percent DESC);
-CREATE INDEX IF NOT EXISTS idx_products_last_seen      ON products(last_seen_at DESC);
-CREATE INDEX IF NOT EXISTS idx_products_category_id    ON products(category_id);
-CREATE INDEX IF NOT EXISTS idx_products_badge_id       ON products(badge_id);
-CREATE INDEX IF NOT EXISTS idx_products_marketplace_id ON products(marketplace_id);
-CREATE INDEX IF NOT EXISTS idx_products_image_status   ON products(image_status);
-CREATE INDEX IF NOT EXISTS idx_products_price          ON products(current_price);
+CREATE INDEX IF NOT EXISTS idx_products_ml_id           ON products(ml_id);
+CREATE INDEX IF NOT EXISTS idx_products_discount        ON products(discount_percent DESC);
+CREATE INDEX IF NOT EXISTS idx_products_last_seen       ON products(last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_products_category_id     ON products(category_id);
+CREATE INDEX IF NOT EXISTS idx_products_badge_id        ON products(badge_id);
+CREATE INDEX IF NOT EXISTS idx_products_marketplace_id  ON products(marketplace_id);
+CREATE INDEX IF NOT EXISTS idx_products_brand_id        ON products(brand_id);
+CREATE INDEX IF NOT EXISTS idx_products_price           ON products(current_price);
+CREATE INDEX IF NOT EXISTS idx_products_deleted_at      ON products(deleted_at) WHERE deleted_at IS NOT NULL;
 
 CREATE OR REPLACE FUNCTION fn_products_on_update()
 RETURNS TRIGGER AS $$
@@ -87,22 +136,23 @@ CREATE TRIGGER trigger_products_on_update
     FOR EACH ROW EXECUTE FUNCTION fn_products_on_update();
 
 -- =============================================================================
--- 5. price_history
+-- 6. price_history
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS price_history (
-    id              UUID        DEFAULT uuid_generate_v4() PRIMARY KEY,
-    product_id      UUID        NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    id              UUID          DEFAULT uuid_generate_v4() PRIMARY KEY,
+    product_id      UUID          NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     price           DECIMAL(10,2) NOT NULL,
     original_price  DECIMAL(10,2),
-    recorded_at     TIMESTAMPTZ DEFAULT NOW()
+    pix_price       DECIMAL(10,2),
+    recorded_at     TIMESTAMPTZ   DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_price_history_product_id       ON price_history(product_id);
-CREATE INDEX IF NOT EXISTS idx_price_history_recorded_at      ON price_history(recorded_at DESC);
-CREATE INDEX IF NOT EXISTS idx_price_history_product_recorded ON price_history(product_id, recorded_at DESC);
+CREATE INDEX IF NOT EXISTS idx_price_history_product_id        ON price_history(product_id);
+CREATE INDEX IF NOT EXISTS idx_price_history_recorded_at       ON price_history(recorded_at DESC);
+CREATE INDEX IF NOT EXISTS idx_price_history_product_recorded  ON price_history(product_id, recorded_at DESC);
 
 -- =============================================================================
--- 6. scored_offers
+-- 7. scored_offers
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS scored_offers (
     id              UUID        DEFAULT uuid_generate_v4() PRIMARY KEY,
@@ -115,33 +165,39 @@ CREATE TABLE IF NOT EXISTS scored_offers (
     queue_priority  INTEGER     DEFAULT 0,
     score_override  INTEGER,
     admin_notes     TEXT,
+    updated_at      TIMESTAMPTZ DEFAULT NOW(),
     CONSTRAINT scored_offers_product_id_unique UNIQUE (product_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_scored_offers_product_id    ON scored_offers(product_id);
-CREATE INDEX IF NOT EXISTS idx_scored_offers_scored_at     ON scored_offers(scored_at DESC);
-CREATE INDEX IF NOT EXISTS idx_scored_offers_status        ON scored_offers(status);
-CREATE INDEX IF NOT EXISTS idx_scored_offers_final_score   ON scored_offers(final_score DESC);
+CREATE TRIGGER trigger_scored_offers_updated_at
+    BEFORE UPDATE ON scored_offers
+    FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
+
+CREATE INDEX IF NOT EXISTS idx_scored_offers_product_id     ON scored_offers(product_id);
+CREATE INDEX IF NOT EXISTS idx_scored_offers_scored_at      ON scored_offers(scored_at DESC);
+CREATE INDEX IF NOT EXISTS idx_scored_offers_status         ON scored_offers(status);
+CREATE INDEX IF NOT EXISTS idx_scored_offers_final_score    ON scored_offers(final_score DESC);
 CREATE INDEX IF NOT EXISTS idx_scored_offers_queue_priority ON scored_offers(queue_priority DESC);
 
 -- =============================================================================
--- 7. sent_offers
+-- 8. sent_offers
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS sent_offers (
     id                  UUID    DEFAULT uuid_generate_v4() PRIMARY KEY,
     scored_offer_id     UUID    NOT NULL REFERENCES scored_offers(id) ON DELETE CASCADE,
+    user_id             UUID    REFERENCES users(id),
     channel             TEXT    NOT NULL CHECK (channel IN ('telegram', 'whatsapp')),
     sent_at             TIMESTAMPTZ DEFAULT NOW(),
-    clicks              INTEGER DEFAULT 0,
     triggered_by        TEXT    DEFAULT 'auto'
 );
 
 CREATE INDEX IF NOT EXISTS idx_sent_offers_scored_offer_id ON sent_offers(scored_offer_id);
 CREATE INDEX IF NOT EXISTS idx_sent_offers_sent_at         ON sent_offers(sent_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sent_offers_channel         ON sent_offers(channel);
+CREATE INDEX IF NOT EXISTS idx_sent_offers_user_id         ON sent_offers(user_id);
 
 -- =============================================================================
--- 8. system_logs
+-- 9. system_logs
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS system_logs (
     id          UUID    DEFAULT uuid_generate_v4() PRIMARY KEY,
@@ -150,69 +206,96 @@ CREATE TABLE IF NOT EXISTS system_logs (
     created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_system_logs_event_type ON system_logs(event_type);
-CREATE INDEX IF NOT EXISTS idx_system_logs_created_at ON system_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_system_logs_event_type  ON system_logs(event_type);
+CREATE INDEX IF NOT EXISTS idx_system_logs_created_at  ON system_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_system_logs_details_gin ON system_logs USING gin(details);
 
 -- =============================================================================
--- 9. users
+-- 10. users
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS users (
     id              UUID        DEFAULT uuid_generate_v4() PRIMARY KEY,
     name            TEXT        NOT NULL,
     affiliate_tag   TEXT        NOT NULL,
     email           TEXT,
-    password_hash   TEXT,
-    ml_cookies      JSONB,
-    created_at      TIMESTAMPTZ DEFAULT NOW()
+    created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW(),
+    deleted_at      TIMESTAMPTZ
 );
 
+CREATE TRIGGER trigger_users_updated_at
+    BEFORE UPDATE ON users
+    FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
+
 CREATE INDEX IF NOT EXISTS idx_users_affiliate_tag ON users(affiliate_tag);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email  ON users(email) WHERE email IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_users_deleted_at    ON users(deleted_at) WHERE deleted_at IS NOT NULL;
 
 -- =============================================================================
--- 10. affiliate_links
+-- 11. user_secrets
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS user_secrets (
+    id          UUID        DEFAULT uuid_generate_v4() PRIMARY KEY,
+    user_id     UUID        NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    ml_cookies  JSONB,
+    updated_at  TIMESTAMPTZ DEFAULT NOW(),
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TRIGGER trigger_user_secrets_updated_at
+    BEFORE UPDATE ON user_secrets
+    FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
+
+-- =============================================================================
+-- 12. affiliate_links
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS affiliate_links (
     id              UUID        DEFAULT uuid_generate_v4() PRIMARY KEY,
     product_id      UUID        NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-    user_id         UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_id         UUID        NOT NULL REFERENCES users(id)    ON DELETE CASCADE,
     short_url       TEXT        NOT NULL,
     long_url        TEXT,
     ml_link_id      TEXT,
     created_at      TIMESTAMPTZ DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE (product_id, user_id)
 );
+
+CREATE TRIGGER trigger_affiliate_links_updated_at
+    BEFORE UPDATE ON affiliate_links
+    FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
 
 CREATE INDEX IF NOT EXISTS idx_affiliate_links_product_id ON affiliate_links(product_id);
 CREATE INDEX IF NOT EXISTS idx_affiliate_links_user_id    ON affiliate_links(user_id);
 
 -- =============================================================================
--- 11. title_examples
+-- 13. title_examples
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS title_examples (
-    id              UUID        DEFAULT uuid_generate_v4() PRIMARY KEY,
-    scored_offer_id UUID        REFERENCES scored_offers(id) ON DELETE SET NULL,
-    product_title   TEXT        NOT NULL,
-    category        TEXT,
-    price           DECIMAL(10,2),
-    generated_title TEXT        NOT NULL,
-    final_title     TEXT        NOT NULL,
-    action          TEXT        NOT NULL CHECK (action IN ('approved', 'edited', 'timeout')),
-    created_at      TIMESTAMPTZ DEFAULT NOW()
+    id              UUID          DEFAULT uuid_generate_v4() PRIMARY KEY,
+    scored_offer_id UUID          REFERENCES scored_offers(id) ON DELETE SET NULL,
+    category_id     UUID          REFERENCES categories(id),
+    generated_title TEXT          NOT NULL,
+    final_title     TEXT          NOT NULL,
+    action          TEXT          NOT NULL CHECK (action IN ('approved', 'edited', 'timeout')),
+    created_at      TIMESTAMPTZ   DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_title_examples_action     ON title_examples(action);
 CREATE INDEX IF NOT EXISTS idx_title_examples_created_at ON title_examples(created_at DESC);
 
 -- =============================================================================
--- 12. admin_settings
+-- 14. admin_settings
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS admin_settings (
     key         TEXT PRIMARY KEY,
     value       JSONB NOT NULL,
     updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE TRIGGER trigger_admin_settings_updated_at
+    BEFORE UPDATE ON admin_settings
+    FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
 
 ALTER TABLE admin_settings ENABLE ROW LEVEL SECURITY;
 
@@ -227,43 +310,53 @@ CREATE POLICY "admin_settings_service_write"
 -- =============================================================================
 -- Row Level Security (RLS)
 -- =============================================================================
-ALTER TABLE badges        ENABLE ROW LEVEL SECURITY;
-ALTER TABLE categories    ENABLE ROW LEVEL SECURITY;
-ALTER TABLE marketplaces  ENABLE ROW LEVEL SECURITY;
-ALTER TABLE products      ENABLE ROW LEVEL SECURITY;
-ALTER TABLE price_history ENABLE ROW LEVEL SECURITY;
-ALTER TABLE scored_offers ENABLE ROW LEVEL SECURITY;
-ALTER TABLE sent_offers   ENABLE ROW LEVEL SECURITY;
-ALTER TABLE system_logs   ENABLE ROW LEVEL SECURITY;
-ALTER TABLE users         ENABLE ROW LEVEL SECURITY;
-ALTER TABLE affiliate_links  ENABLE ROW LEVEL SECURITY;
-ALTER TABLE title_examples   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE badges          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE categories      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE marketplaces    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE brands          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE products        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE price_history   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE scored_offers   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sent_offers     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE system_logs     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE users           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE affiliate_links ENABLE ROW LEVEL SECURITY;
+ALTER TABLE title_examples  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_secrets    ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "badges_public_read"        ON badges        FOR SELECT USING (true);
-CREATE POLICY "badges_service_write"      ON badges        FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY "categories_public_read"    ON categories    FOR SELECT USING (true);
-CREATE POLICY "categories_service_write"  ON categories    FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY "marketplaces_public_read"  ON marketplaces  FOR SELECT USING (true);
-CREATE POLICY "marketplaces_service_write" ON marketplaces FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY "products_public_read"      ON products      FOR SELECT USING (true);
-CREATE POLICY "products_service_write"    ON products      FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY "price_history_public_read" ON price_history FOR SELECT USING (true);
-CREATE POLICY "price_history_service_write" ON price_history FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY "scored_offers_public_read" ON scored_offers FOR SELECT USING (true);
-CREATE POLICY "scored_offers_service_write" ON scored_offers FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY "sent_offers_public_read"   ON sent_offers   FOR SELECT USING (true);
-CREATE POLICY "sent_offers_service_write" ON sent_offers   FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY "system_logs_service_only"  ON system_logs   FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY "users_public_read"         ON users         FOR SELECT USING (true);
-CREATE POLICY "users_service_write"       ON users         FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY "affiliate_links_public_read"  ON affiliate_links FOR SELECT USING (true);
-CREATE POLICY "affiliate_links_service_write" ON affiliate_links FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
-CREATE POLICY "title_examples_public_read"  ON title_examples FOR SELECT USING (true);
-CREATE POLICY "title_examples_service_write" ON title_examples FOR ALL USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
+-- Lookup tables: SELECT público
+CREATE POLICY "badges_public_read"             ON badges          FOR SELECT USING (true);
+CREATE POLICY "badges_service_write"           ON badges          FOR ALL    USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
+CREATE POLICY "categories_public_read"         ON categories      FOR SELECT USING (true);
+CREATE POLICY "categories_service_write"       ON categories      FOR ALL    USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
+CREATE POLICY "marketplaces_public_read"       ON marketplaces    FOR SELECT USING (true);
+CREATE POLICY "marketplaces_service_write"     ON marketplaces    FOR ALL    USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
+CREATE POLICY "brands_public_read"             ON brands          FOR SELECT USING (true);
+CREATE POLICY "brands_service_write"           ON brands          FOR ALL    USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
+CREATE POLICY "products_public_read"           ON products        FOR SELECT USING (true);
+CREATE POLICY "products_service_write"         ON products        FOR ALL    USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
+
+-- Tabelas restritas: somente service_role (ou owner)
+CREATE POLICY "price_history_service_read"     ON price_history   FOR SELECT USING (auth.role() = 'service_role');
+CREATE POLICY "price_history_service_write"    ON price_history   FOR ALL    USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
+CREATE POLICY "scored_offers_service_read"     ON scored_offers   FOR SELECT USING (auth.role() = 'service_role');
+CREATE POLICY "scored_offers_service_write"    ON scored_offers   FOR ALL    USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
+CREATE POLICY "sent_offers_service_read"       ON sent_offers     FOR SELECT USING (auth.role() = 'service_role');
+CREATE POLICY "sent_offers_service_write"      ON sent_offers     FOR ALL    USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
+CREATE POLICY "system_logs_service_only"       ON system_logs     FOR ALL    USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
+CREATE POLICY "users_authenticated_read"       ON users           FOR SELECT USING (auth.role() = 'service_role' OR auth.uid() = id);
+CREATE POLICY "users_service_write"            ON users           FOR ALL    USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
+CREATE POLICY "affiliate_links_authenticated_read" ON affiliate_links FOR SELECT USING (auth.role() = 'service_role' OR auth.uid() = user_id);
+CREATE POLICY "affiliate_links_service_write"  ON affiliate_links FOR ALL    USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
+CREATE POLICY "title_examples_service_read"    ON title_examples  FOR SELECT USING (auth.role() = 'service_role');
+CREATE POLICY "title_examples_service_write"   ON title_examples  FOR ALL    USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
+CREATE POLICY "user_secrets_service_only"      ON user_secrets    FOR ALL    USING (auth.role() = 'service_role') WITH CHECK (auth.role() = 'service_role');
 
 -- =============================================================================
 -- Views
 -- =============================================================================
+
+-- Ofertas aprovadas ainda não enviadas nas últimas 24h (fila de envio)
 CREATE OR REPLACE VIEW vw_approved_unsent AS
 SELECT
     p.id            AS product_id,
@@ -273,12 +366,17 @@ SELECT
     p.original_price,
     p.pix_price,
     p.discount_percent,
+    p.discount_type,
     p.free_shipping,
+    p.full_shipping,
+    br.name         AS brand,
     p.thumbnail_url,
     p.product_url,
     p.rating_stars,
     p.rating_count,
     p.installments_without_interest,
+    p.installment_count,
+    p.installment_value,
     c.name          AS category,
     b.name          AS badge,
     so.id           AS scored_offer_id,
@@ -291,7 +389,9 @@ FROM scored_offers so
 JOIN products p ON p.id = so.product_id
 LEFT JOIN categories c ON c.id = p.category_id
 LEFT JOIN badges b ON b.id = p.badge_id
+LEFT JOIN brands br ON br.id = p.brand_id
 WHERE so.status = 'approved'
+  AND p.deleted_at IS NULL
   AND COALESCE(so.score_override, so.final_score) >= 60
   AND NOT EXISTS (
       SELECT 1 FROM sent_offers se
@@ -300,18 +400,21 @@ WHERE so.status = 'approved'
   )
 ORDER BY so.queue_priority DESC, COALESCE(so.score_override, so.final_score) DESC;
 
+-- Resumo das últimas 24h (KPIs do dashboard)
 CREATE OR REPLACE VIEW vw_last_24h_summary AS
 SELECT
-    (SELECT COUNT(*) FROM products      WHERE last_seen_at >= NOW() - INTERVAL '24 hours') AS products_scraped,
-    (SELECT COUNT(*) FROM scored_offers WHERE scored_at   >= NOW() - INTERVAL '24 hours') AS offers_scored,
-    (SELECT COUNT(*) FROM scored_offers WHERE scored_at   >= NOW() - INTERVAL '24 hours'
+    (SELECT COUNT(*) FROM products      WHERE last_seen_at >= NOW() - INTERVAL '24 hours' AND deleted_at IS NULL) AS products_scraped,
+    (SELECT COUNT(*) FROM scored_offers WHERE scored_at    >= NOW() - INTERVAL '24 hours') AS offers_scored,
+    (SELECT COUNT(*) FROM scored_offers WHERE scored_at    >= NOW() - INTERVAL '24 hours'
                                          AND status = 'approved')                          AS offers_approved,
-    (SELECT COUNT(*) FROM sent_offers   WHERE sent_at     >= NOW() - INTERVAL '24 hours') AS offers_sent,
+    (SELECT COUNT(*) FROM sent_offers   WHERE sent_at      >= NOW() - INTERVAL '24 hours') AS offers_sent,
     (SELECT ROUND(AVG(final_score), 1)  FROM scored_offers
-                                        WHERE scored_at   >= NOW() - INTERVAL '24 hours') AS avg_score,
+                                        WHERE scored_at    >= NOW() - INTERVAL '24 hours') AS avg_score,
     (SELECT MAX(discount_percent)       FROM products
-                                        WHERE last_seen_at >= NOW() - INTERVAL '24 hours') AS max_discount_pct;
+                                        WHERE last_seen_at >= NOW() - INTERVAL '24 hours'
+                                          AND deleted_at IS NULL)                          AS max_discount_pct;
 
+-- Top 20 deals ativos nas últimas 6h
 CREATE OR REPLACE VIEW vw_top_deals AS
 SELECT
     p.id            AS product_id,
@@ -321,9 +424,14 @@ SELECT
     p.original_price,
     p.pix_price,
     p.discount_percent,
+    p.discount_type,
     p.free_shipping,
+    p.full_shipping,
+    br.name         AS brand,
     p.thumbnail_url,
     p.product_url,
+    p.installment_count,
+    p.installment_value,
     c.name          AS category,
     b.name          AS badge,
     so.final_score
@@ -331,7 +439,9 @@ FROM products p
 JOIN scored_offers so ON so.product_id = p.id
 LEFT JOIN categories c ON c.id = p.category_id
 LEFT JOIN badges b ON b.id = p.badge_id
+LEFT JOIN brands br ON br.id = p.brand_id
 WHERE p.last_seen_at >= NOW() - INTERVAL '6 hours'
+  AND p.deleted_at IS NULL
   AND so.status = 'approved'
 ORDER BY so.final_score DESC, p.discount_percent DESC
 LIMIT 20;

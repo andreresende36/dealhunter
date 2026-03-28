@@ -210,6 +210,7 @@ class SupabaseClient:
         badge_id: str | None = None,
         category_id: str | None = None,
         marketplace_id: str | None = None,
+        brand_id: str | None = None,
     ) -> Optional[str]:
         """
         Insere ou atualiza um produto pelo ml_id.
@@ -225,6 +226,7 @@ class SupabaseClient:
             badge_id=badge_id,
             category_id=category_id,
             marketplace_id=marketplace_id,
+            brand_id=brand_id,
         )
         try:
             result = (
@@ -294,6 +296,7 @@ class SupabaseClient:
         badge_ids: dict[str, str | None] | None = None,
         category_ids: dict[str, str | None] | None = None,
         marketplace_ids: dict[str, str | None] | None = None,
+        brand_ids: dict[str, str | None] | None = None,
     ) -> dict[str, str]:
         """
         Upsert de múltiplos produtos em UMA única chamada.
@@ -305,6 +308,7 @@ class SupabaseClient:
         badges_map = badge_ids or {}
         cats_map = category_ids or {}
         mps_map = marketplace_ids or {}
+        brands_map = brand_ids or {}
         # Deduplica por ml_id (Supabase rejeita ON CONFLICT com dupes na mesma batch)
         seen: dict[str, "ScrapedProduct"] = {}
         for p in products:
@@ -316,6 +320,7 @@ class SupabaseClient:
                 badge_id=badges_map.get(p.ml_id),
                 category_id=cats_map.get(p.ml_id),
                 marketplace_id=mps_map.get(p.ml_id),
+                brand_id=brands_map.get(p.ml_id),
             )
             for p in unique_products
         ]
@@ -613,7 +618,6 @@ class SupabaseClient:
             "scored_offer_id": scored_offer_id,
             "channel": channel,
             "sent_at": datetime.now(tz=timezone.utc).isoformat(),
-            "clicks": 0,
         }
         try:
             await self._db.table("sent_offers").insert(data).execute()
@@ -651,22 +655,6 @@ class SupabaseClient:
             raise SupabaseError(
                 str(exc), operation="was_recently_sent", ml_id=ml_id
             ) from exc
-
-    async def update_click_count(
-        self, scored_offer_id: str, channel: str, clicks: int
-    ) -> bool:
-        """Atualiza o contador de cliques de um envio."""
-        try:
-            await (
-                self._db.table("sent_offers")
-                .update({"clicks": clicks})
-                .eq("scored_offer_id", scored_offer_id)
-                .eq("channel", channel)
-                .execute()
-            )
-            return True
-        except Exception as exc:
-            raise SupabaseError(str(exc), operation="update_click_count") from exc
 
     # ------------------------------------------------------------------
     # system_logs
@@ -729,8 +717,6 @@ class SupabaseClient:
         name: str,
         affiliate_tag: str,
         email: str | None = None,
-        password_hash: str | None = None,
-        ml_cookies: dict | None = None,
     ) -> Optional[str]:
         """Retorna o ID do user pela tag. Cria se nao existir."""
         try:
@@ -746,12 +732,9 @@ class SupabaseClient:
             data: dict = {
                 "name": name,
                 "affiliate_tag": affiliate_tag,
-                "ml_cookies": ml_cookies,
             }
             if email:
                 data["email"] = email
-            if password_hash:
-                data["password_hash"] = password_hash
             result = await self._db.table("users").insert(data).execute()
             if result.data:
                 user_id: str = result.data[0]["id"]
@@ -865,25 +848,6 @@ class SupabaseClient:
                 str(exc), operation="save_affiliate_links_batch"
             ) from exc
 
-    # ------------------------------------------------------------------
-    # Image Worker
-    # ------------------------------------------------------------------
-
-    async def get_pending_images(self, batch_size: int = 5) -> list[dict]:
-        """Retorna produtos que precisam de processamento de imagem."""
-        try:
-            result = (
-                await self._db.table("products")
-                .select("id, ml_id, title, thumbnail_url")
-                .eq("image_status", "pending")
-                .order("last_seen_at", desc=True)
-                .limit(batch_size)
-                .execute()
-            )
-            return result.data or []
-        except Exception as exc:
-            raise SupabaseError(str(exc), operation="get_pending_images") from exc
-
     async def discard_offer(self, scored_offer_id: str, reason: str) -> bool:
         """Marca oferta como rejeitada (reprovada pelo validador)."""
         try:
@@ -901,43 +865,40 @@ class SupabaseClient:
         except Exception as exc:
             raise SupabaseError(str(exc), operation="discard_offer") from exc
 
-    async def update_image_status(
-        self,
-        product_id: str,
-        status: str,
-        enhanced_url: str | None = None,
-    ) -> bool:
-        """Atualiza o status de processamento de imagem de um produto."""
-        data: dict = {"image_status": status}
-        if enhanced_url:
-            data["enhanced_image_url"] = enhanced_url
-        try:
-            await (
-                self._db.table("products")
-                .update(data)
-                .eq("id", product_id)
-                .execute()
-            )
-            return True
-        except Exception as exc:
-            raise SupabaseError(str(exc), operation="update_image_status") from exc
+    # ------------------------------------------------------------------
+    # brands
+    # ------------------------------------------------------------------
 
-    async def get_enhanced_image_url(self, product_id: str) -> str | None:
-        """Retorna a URL da imagem aprimorada, se existir."""
+    async def get_or_create_brand(self, name: str) -> Optional[str]:
+        """Retorna o ID da brand pelo nome. Cria se não existir."""
+        if not name:
+            return None
         try:
             result = (
-                await self._db.table("products")
-                .select("enhanced_image_url")
-                .eq("id", product_id)
-                .eq("image_status", "enhanced")
+                await self._db.table("brands")
+                .select("id")
+                .eq("name", name)
                 .limit(1)
                 .execute()
             )
-            if result.data and result.data[0].get("enhanced_image_url"):
-                return result.data[0]["enhanced_image_url"]
+            if result.data:
+                return result.data[0]["id"]
+            result = await self._db.table("brands").insert({"name": name}).execute()
+            if result.data:
+                brand_id: str = result.data[0]["id"]
+                logger.debug("supabase_brand_created", name=name, brand_id=brand_id)
+                return brand_id
             return None
         except Exception as exc:
-            raise SupabaseError(str(exc), operation="get_enhanced_image_url") from exc
+            raise SupabaseError(str(exc), operation="get_or_create_brand") from exc
+
+    async def get_all_brands(self) -> dict[str, str]:
+        """Retorna todas as brands como {nome: uuid}."""
+        try:
+            result = await self._db.table("brands").select(_FIELDS_ID_NAME).execute()
+            return {row["name"]: row["id"] for row in (result.data or [])}
+        except Exception as exc:
+            raise SupabaseError(str(exc), operation="get_all_brands") from exc
 
     # ------------------------------------------------------------------
     # title_examples
@@ -947,9 +908,7 @@ class SupabaseClient:
         """Salva um exemplo de título aprovado/editado."""
         row = {
             "scored_offer_id": data.get("scored_offer_id"),
-            "product_title": data["product_title"],
-            "category": data.get("category"),
-            "price": data.get("price"),
+            "category_id": data.get("category_id"),
             "generated_title": data["generated_title"],
             "final_title": data["final_title"],
             "action": data["action"],
@@ -965,17 +924,34 @@ class SupabaseClient:
             raise SupabaseError(str(exc), operation="save_title_example") from exc
 
     async def get_recent_title_examples(self, limit: int = 10) -> list[dict]:
-        """Retorna exemplos recentes de títulos aprovados/editados."""
+        """Retorna exemplos recentes de títulos aprovados/editados.
+
+        Joins via scored_offer_id → scored_offers → products to get product_title.
+        """
         try:
             result = (
                 await self._db.table("title_examples")
-                .select("product_title, final_title, action")
+                .select("final_title, action, scored_offers(products(title))")
                 .in_("action", ["approved", "edited"])
                 .order("created_at", desc=True)
                 .limit(limit)
                 .execute()
             )
-            return result.data or []
+            # Flatten the nested join data
+            examples = []
+            for row in (result.data or []):
+                product_title = ""
+                scored_offer = row.get("scored_offers")
+                if scored_offer and isinstance(scored_offer, dict):
+                    product = scored_offer.get("products")
+                    if product and isinstance(product, dict):
+                        product_title = product.get("title", "")
+                examples.append({
+                    "product_title": product_title,
+                    "final_title": row["final_title"],
+                    "action": row["action"],
+                })
+            return examples
         except Exception as exc:
             raise SupabaseError(str(exc), operation="get_recent_title_examples") from exc
 
@@ -989,6 +965,7 @@ class SupabaseClient:
         badge_id: str | None = None,
         category_id: str | None = None,
         marketplace_id: str | None = None,
+        brand_id: str | None = None,
     ) -> dict:
         """
         Mapeia os campos do ScrapedProduct para as colunas da tabela products.
@@ -1002,7 +979,13 @@ class SupabaseClient:
           installments_without_interest → installments_without_interest
           image_url     → thumbnail_url
           category      → category_id  (resolvido externamente)
+          brand         → brand_id     (resolvido externamente)
         """
+        # Serialize variations to JSONB-compatible format
+        variations_jsonb = None
+        if product.variations:
+            variations_jsonb = {"raw": product.variations}
+
         now = datetime.now(tz=timezone.utc).isoformat()
         row = {
             "ml_id": product.ml_id,
@@ -1018,8 +1001,8 @@ class SupabaseClient:
             "installments_without_interest": product.installments_without_interest,
             "installment_count": product.installment_count,
             "installment_value": product.installment_value,
-            "brand": product.brand,
-            "variations": product.variations,
+            "brand_id": brand_id,
+            "variations": variations_jsonb,
             "discount_type": product.discount_type,
             "gender": product.gender,
             "thumbnail_url": product.image_url,

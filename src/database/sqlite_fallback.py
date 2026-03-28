@@ -38,6 +38,7 @@ if TYPE_CHECKING:
 logger = structlog.get_logger(__name__)
 
 _SQL_GET_BADGE = "SELECT id FROM badges WHERE name = ?"
+_SQL_GET_BRAND = "SELECT id FROM brands WHERE name = ?"
 _SQL_GET_CATEGORY = "SELECT id FROM categories WHERE name = ?"
 _SQL_GET_MARKETPLACE = "SELECT id FROM marketplaces WHERE name = ?"
 
@@ -142,20 +143,19 @@ class SQLiteFallback:
             installments_without_interest INTEGER DEFAULT 0,
             installment_count INTEGER,
             installment_value REAL,
-            brand             TEXT DEFAULT '',
-            variations        TEXT DEFAULT '',
-            discount_type     TEXT DEFAULT '',
-            gender            TEXT DEFAULT 'Sem gênero',
+            brand_id          TEXT REFERENCES brands(id),
+            variations        TEXT,
+            discount_type     TEXT,
+            gender            TEXT DEFAULT 'gender_neutral',
             thumbnail_url     TEXT DEFAULT '',
             product_url       TEXT DEFAULT '',
             category_id       TEXT REFERENCES categories(id),
             badge_id          TEXT REFERENCES badges(id),
             marketplace_id    TEXT REFERENCES marketplaces(id),
-            enhanced_image_url TEXT,
-            image_status      TEXT DEFAULT 'pending',
             first_seen_at     TEXT DEFAULT (datetime('now')),
             last_seen_at      TEXT DEFAULT (datetime('now')),
             created_at        TEXT DEFAULT (datetime('now')),
+            deleted_at        TEXT,
             synced            INTEGER DEFAULT 0
         );
 
@@ -188,9 +188,9 @@ class SQLiteFallback:
             id              TEXT PRIMARY KEY,
             scored_offer_id TEXT NOT NULL
                                 REFERENCES scored_offers(id) ON DELETE CASCADE,
+            user_id          TEXT REFERENCES users(id),
             channel          TEXT NOT NULL,
             sent_at          TEXT DEFAULT (datetime('now')),
-            clicks           INTEGER DEFAULT 0,
             triggered_by     TEXT DEFAULT 'auto',
             synced           INTEGER DEFAULT 0
         );
@@ -240,9 +240,8 @@ class SQLiteFallback:
             name            TEXT NOT NULL,
             affiliate_tag   TEXT NOT NULL,
             email           TEXT,
-            password_hash   TEXT,
-            ml_cookies      TEXT,
             created_at      TEXT DEFAULT (datetime('now')),
+            deleted_at      TEXT,
             synced          INTEGER DEFAULT 0
         );
 
@@ -267,9 +266,7 @@ class SQLiteFallback:
         CREATE TABLE IF NOT EXISTS title_examples (
             id              TEXT PRIMARY KEY,
             scored_offer_id TEXT REFERENCES scored_offers(id) ON DELETE SET NULL,
-            product_title   TEXT NOT NULL,
-            category        TEXT,
-            price           REAL,
+            category_id     TEXT REFERENCES categories(id),
             generated_title TEXT NOT NULL,
             final_title     TEXT NOT NULL,
             action          TEXT NOT NULL CHECK (action IN ('approved', 'edited', 'timeout')),
@@ -286,6 +283,19 @@ class SQLiteFallback:
             value      TEXT NOT NULL,
             updated_at TEXT DEFAULT (datetime('now'))
         );
+
+        CREATE TABLE IF NOT EXISTS brands (
+            id          TEXT PRIMARY KEY,
+            name        TEXT NOT NULL UNIQUE,
+            created_at  TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS user_secrets (
+            id          TEXT PRIMARY KEY,
+            user_id     TEXT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+            ml_cookies  TEXT,
+            created_at  TEXT DEFAULT (datetime('now'))
+        );
         """
         await self._db.executescript(schema)
         await self._db.commit()
@@ -297,7 +307,9 @@ class SQLiteFallback:
             ("marketplace_id", "TEXT REFERENCES marketplaces(id)"),
             ("installments_without_interest", "INTEGER DEFAULT 0"),
             ("pix_price", "REAL"),
-            ("gender", "TEXT DEFAULT 'Sem gênero'"),
+            ("gender", "TEXT DEFAULT 'gender_neutral'"),
+            ("brand_id", "TEXT REFERENCES brands(id)"),
+            ("deleted_at", "TEXT"),
         ]:
             try:
                 await self._db.execute(f"ALTER TABLE products ADD COLUMN {col} {ref}")
@@ -318,7 +330,7 @@ class SQLiteFallback:
         # Migrações incrementais para a tabela users
         for col, definition in [
             ("email", "TEXT"),
-            ("password_hash", "TEXT"),
+            ("deleted_at", "TEXT"),
         ]:
             try:
                 await self._db.execute(f"ALTER TABLE users ADD COLUMN {col} {definition}")
@@ -331,25 +343,6 @@ class SQLiteFallback:
             await self._db.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS "
                 "idx_u_email ON users(email) WHERE email IS NOT NULL"
-            )
-            await self._db.commit()
-        except Exception:
-            pass
-
-        # Migrações incrementais — image worker
-        for col, definition in [
-            ("enhanced_image_url", "TEXT"),
-            ("image_status", "TEXT DEFAULT 'pending'"),
-        ]:
-            try:
-                await self._db.execute(f"ALTER TABLE products ADD COLUMN {col} {definition}")
-                await self._db.commit()
-            except Exception:
-                pass  # Coluna já existe
-
-        try:
-            await self._db.execute(
-                "CREATE INDEX IF NOT EXISTS idx_p_image_status ON products(image_status)"
             )
             await self._db.commit()
         except Exception:
@@ -407,14 +400,13 @@ class SQLiteFallback:
         except Exception:
             pass  # Coluna já removida ou nunca existiu
 
-        # Migrações incrementais — migration 021 (brand, installments, FULL, etc.)
+        # Migrações incrementais — migration 021 (installments, FULL, etc.)
         for col, definition in [
-            ("brand", "TEXT DEFAULT ''"),
             ("full_shipping", "INTEGER DEFAULT 0"),
-            ("variations", "TEXT DEFAULT ''"),
+            ("variations", "TEXT"),
             ("installment_count", "INTEGER"),
             ("installment_value", "REAL"),
-            ("discount_type", "TEXT DEFAULT ''"),
+            ("discount_type", "TEXT"),
         ]:
             try:
                 await self._db.execute(f"ALTER TABLE products ADD COLUMN {col} {definition}")
@@ -444,7 +436,7 @@ class SQLiteFallback:
             p.discount_type,
             p.free_shipping,
             p.full_shipping,
-            p.brand,
+            br.name         AS brand,
             p.thumbnail_url,
             p.product_url,
             p.rating_stars,
@@ -464,8 +456,10 @@ class SQLiteFallback:
         JOIN products p ON p.id = so.product_id
         LEFT JOIN categories c ON c.id = p.category_id
         LEFT JOIN badges b ON b.id = p.badge_id
+        LEFT JOIN brands br ON br.id = p.brand_id
         WHERE so.status = 'approved'
           AND COALESCE(so.score_override, so.final_score) >= 60
+          AND p.deleted_at IS NULL
           AND NOT EXISTS (
               SELECT 1 FROM sent_offers se
               WHERE se.scored_offer_id = so.id
@@ -478,6 +472,7 @@ class SQLiteFallback:
         SELECT
             (SELECT COUNT(*) FROM products
              WHERE last_seen_at >= datetime('now', '-24 hours')
+               AND deleted_at IS NULL
             ) AS products_scraped,
             (SELECT COUNT(*) FROM scored_offers
              WHERE scored_at >= datetime('now', '-24 hours')
@@ -496,6 +491,7 @@ class SQLiteFallback:
             (SELECT MAX(discount_percent)
              FROM products
              WHERE last_seen_at >= datetime('now', '-24 hours')
+               AND deleted_at IS NULL
             ) AS max_discount_pct;
 
         DROP VIEW IF EXISTS vw_top_deals;
@@ -514,8 +510,10 @@ class SQLiteFallback:
         FROM products p
         JOIN scored_offers so ON so.product_id = p.id
         LEFT JOIN categories c ON c.id = p.category_id
+        LEFT JOIN brands br ON br.id = p.brand_id
         WHERE p.last_seen_at >= datetime('now', '-6 hours')
           AND so.status = 'approved'
+          AND p.deleted_at IS NULL
         ORDER BY so.final_score DESC, p.discount_percent DESC
         LIMIT 20;
         """)
@@ -704,6 +702,75 @@ class SQLiteFallback:
             logger.warning("sqlite_ensure_badge_id_failed", name=name, error=str(exc))
 
     # ------------------------------------------------------------------
+    # brands
+    # ------------------------------------------------------------------
+
+    async def get_all_brands(self) -> dict[str, str]:
+        """Retorna todas as brands como {nome: uuid}."""
+        try:
+            cursor = await self._db.execute("SELECT id, name FROM brands")
+            rows = await cursor.fetchall()
+            return {row["name"]: row["id"] for row in rows}
+        except Exception as exc:
+            raise SQLiteError(str(exc), operation="get_all_brands") from exc
+
+    async def get_or_create_brand(self, name: str) -> Optional[str]:
+        """Retorna o ID da brand pelo nome. Cria se não existir."""
+        if not name:
+            return None
+        try:
+            cursor = await self._db.execute(
+                _SQL_GET_BRAND, (name,)
+            )
+            row = await cursor.fetchone()
+            if row:
+                return row["id"]
+            brand_id = str(uuid.uuid4())
+            await self._db.execute(
+                "INSERT INTO brands (id, name) VALUES (?, ?)",
+                (brand_id, name),
+            )
+            await self._db.commit()
+            logger.debug("sqlite_brand_created", name=name, brand_id=brand_id)
+            return brand_id
+        except Exception as exc:
+            raise SQLiteError(str(exc), operation="get_or_create_brand") from exc
+
+    async def ensure_brand_id(self, name: str, brand_id: str) -> None:
+        """Garante que a brand exista no SQLite com o UUID especificado (do Supabase).
+
+        Mesma lógica do ensure_badge_id: sincroniza o UUID local com o remoto.
+        """
+        try:
+            cursor = await self._db.execute(
+                _SQL_GET_BRAND, (name,)
+            )
+            row = await cursor.fetchone()
+            if not row:
+                await self._db.execute(
+                    "INSERT OR IGNORE INTO brands (id, name) VALUES (?, ?)",
+                    (brand_id, name),
+                )
+                await self._db.commit()
+            elif row["id"] != brand_id:
+                local_id = row["id"]
+                await self._db.execute("PRAGMA foreign_keys=OFF")
+                try:
+                    await self._db.execute(
+                        "UPDATE brands SET id = ? WHERE name = ?",
+                        (brand_id, name),
+                    )
+                    await self._db.execute(
+                        "UPDATE products SET brand_id = ? WHERE brand_id = ?",
+                        (brand_id, local_id),
+                    )
+                    await self._db.commit()
+                finally:
+                    await self._db.execute("PRAGMA foreign_keys=ON")
+        except Exception as exc:
+            logger.warning("sqlite_ensure_brand_id_failed", name=name, error=str(exc))
+
+    # ------------------------------------------------------------------
     # categories
     # ------------------------------------------------------------------
 
@@ -849,6 +916,7 @@ class SQLiteFallback:
         badge_id: Optional[str] = None,
         category_id: Optional[str] = None,
         marketplace_id: Optional[str] = None,
+        brand_id: Optional[str] = None,
     ) -> Optional[str]:
         """
         Insere ou atualiza um produto pelo ml_id.
@@ -887,7 +955,7 @@ class SQLiteFallback:
                         free_shipping=?, full_shipping=?,
                         installments_without_interest=?,
                         installment_count=?, installment_value=?,
-                        brand=?, variations=?, discount_type=?, gender=?,
+                        brand_id=?, variations=?, discount_type=?, gender=?,
                         thumbnail_url=?, product_url=?, category_id=?, badge_id=?,
                         marketplace_id=?, first_seen_at=?, last_seen_at=?, synced=0
                     WHERE ml_id=?
@@ -905,7 +973,7 @@ class SQLiteFallback:
                         int(product.installments_without_interest),
                         product.installment_count,
                         product.installment_value,
-                        product.brand,
+                        brand_id,
                         product.variations,
                         product.discount_type,
                         product.gender,
@@ -930,7 +998,7 @@ class SQLiteFallback:
                         free_shipping, full_shipping,
                         installments_without_interest,
                         installment_count, installment_value,
-                        brand, variations, discount_type, gender,
+                        brand_id, variations, discount_type, gender,
                         thumbnail_url, product_url,
                         category_id, badge_id, marketplace_id,
                         first_seen_at, last_seen_at
@@ -951,7 +1019,7 @@ class SQLiteFallback:
                         int(product.installments_without_interest),
                         product.installment_count,
                         product.installment_value,
-                        product.brand,
+                        brand_id,
                         product.variations,
                         product.discount_type,
                         product.gender,
@@ -1000,6 +1068,7 @@ class SQLiteFallback:
         badge_ids: dict[str, str | None] | None = None,
         category_ids: dict[str, str | None] | None = None,
         marketplace_ids: dict[str, str | None] | None = None,
+        brand_ids: dict[str, str | None] | None = None,
     ) -> dict[str, str]:
         """
         Upsert de múltiplos produtos em 1 transação (1 commit).
@@ -1025,6 +1094,7 @@ class SQLiteFallback:
         badges_map = badge_ids or {}
         cats_map = category_ids or {}
         mps_map = marketplace_ids or {}
+        brands_map = brand_ids or {}
 
         try:
             # Busca todos os existentes em 1 query
@@ -1040,6 +1110,7 @@ class SQLiteFallback:
                 b_id = badges_map.get(p.ml_id)
                 c_id = cats_map.get(p.ml_id)
                 mp_id = mps_map.get(p.ml_id)
+                br_id = brands_map.get(p.ml_id)
                 if p.ml_id in existing:
                     pid = existing[p.ml_id]["id"]
                     first_seen = existing[p.ml_id]["first_seen_at"]
@@ -1052,7 +1123,7 @@ class SQLiteFallback:
                             free_shipping=?, full_shipping=?,
                             installments_without_interest=?,
                             installment_count=?, installment_value=?,
-                            brand=?, variations=?, discount_type=?, gender=?,
+                            brand_id=?, variations=?, discount_type=?, gender=?,
                             thumbnail_url=?, product_url=?, category_id=?, badge_id=?,
                             marketplace_id=?, first_seen_at=?, last_seen_at=?, synced=0
                         WHERE ml_id=?
@@ -1070,7 +1141,7 @@ class SQLiteFallback:
                             int(p.installments_without_interest),
                             p.installment_count,
                             p.installment_value,
-                            p.brand,
+                            br_id,
                             p.variations,
                             p.discount_type,
                             p.gender,
@@ -1096,7 +1167,7 @@ class SQLiteFallback:
                             free_shipping, full_shipping,
                             installments_without_interest,
                             installment_count, installment_value,
-                            brand, variations, discount_type, gender,
+                            brand_id, variations, discount_type, gender,
                             thumbnail_url, product_url, category_id, badge_id,
                             marketplace_id, first_seen_at, last_seen_at
                         ) VALUES (
@@ -1118,7 +1189,7 @@ class SQLiteFallback:
                             int(p.installments_without_interest),
                             p.installment_count,
                             p.installment_value,
-                            p.brand,
+                            br_id,
                             p.variations,
                             p.discount_type,
                             p.gender,
@@ -1881,8 +1952,6 @@ class SQLiteFallback:
         name: str,
         affiliate_tag: str,
         email: str | None = None,
-        password_hash: str | None = None,
-        ml_cookies: dict | None = None,
         user_id: str | None = None,
     ) -> Optional[str]:
         """Retorna o ID do user pela tag. Cria se nao existir."""
@@ -1895,11 +1964,10 @@ class SQLiteFallback:
             if row:
                 return row[0]
             uid = user_id or str(uuid.uuid4())
-            cookies_json = json.dumps(ml_cookies) if ml_cookies else None
             await self._db.execute(
-                "INSERT INTO users (id, name, affiliate_tag, email, password_hash, ml_cookies) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (uid, name, affiliate_tag, email, password_hash, cookies_json),
+                "INSERT INTO users (id, name, affiliate_tag, email) "
+                "VALUES (?, ?, ?, ?)",
+                (uid, name, affiliate_tag, email),
             )
             await self._db.commit()
             return uid
@@ -1910,7 +1978,7 @@ class SQLiteFallback:
         """Retorna o user completo pela tag."""
         try:
             cursor = await self._db.execute(
-                "SELECT id, name, affiliate_tag, ml_cookies, created_at "
+                "SELECT id, name, affiliate_tag, created_at "
                 "FROM users WHERE affiliate_tag = ?",
                 (affiliate_tag,),
             )
@@ -1921,8 +1989,7 @@ class SQLiteFallback:
                 "id": row[0],
                 "name": row[1],
                 "affiliate_tag": row[2],
-                "ml_cookies": json.loads(row[3]) if row[3] else None,
-                "created_at": row[4],
+                "created_at": row[3],
             }
         except Exception as exc:
             raise SQLiteError(str(exc), operation="get_user_by_tag") from exc
@@ -2036,36 +2103,6 @@ class SQLiteFallback:
                 str(exc), operation="save_affiliate_links_batch"
             ) from exc
 
-    # ------------------------------------------------------------------
-    # Image Worker
-    # ------------------------------------------------------------------
-
-    async def get_pending_images(self, batch_size: int = 5) -> list[dict]:
-        """Retorna produtos que precisam de processamento de imagem."""
-        try:
-            cursor = await self._db.execute(
-                """
-                SELECT id, ml_id, title, thumbnail_url
-                FROM products
-                WHERE image_status = 'pending'
-                ORDER BY last_seen_at DESC
-                LIMIT ?
-                """,
-                (batch_size,),
-            )
-            rows = await cursor.fetchall()
-            return [
-                {
-                    "id": row[0],
-                    "ml_id": row[1],
-                    "title": row[2],
-                    "thumbnail_url": row[3],
-                }
-                for row in rows
-            ]
-        except Exception as exc:
-            raise SQLiteError(str(exc), operation="get_pending_images") from exc
-
     async def discard_offer(self, scored_offer_id: str, reason: str) -> bool:
         """Marca oferta como rejeitada (reprovada pelo validador)."""
         try:
@@ -2098,42 +2135,6 @@ class SQLiteFallback:
         except Exception as exc:
             raise SQLiteError(str(exc), operation="revert_to_pending") from exc
 
-    async def update_image_status(
-        self,
-        product_id: str,
-        status: str,
-        enhanced_url: str | None = None,
-    ) -> bool:
-        """Atualiza o status de processamento de imagem de um produto."""
-        try:
-            if enhanced_url:
-                await self._db.execute(
-                    "UPDATE products SET image_status = ?, enhanced_image_url = ? WHERE id = ?",
-                    (status, enhanced_url, product_id),
-                )
-            else:
-                await self._db.execute(
-                    "UPDATE products SET image_status = ? WHERE id = ?",
-                    (status, product_id),
-                )
-            await self._db.commit()
-            return True
-        except Exception as exc:
-            raise SQLiteError(str(exc), operation="update_image_status") from exc
-
-    async def get_enhanced_image_url(self, product_id: str) -> str | None:
-        """Retorna a URL da imagem aprimorada, se existir."""
-        try:
-            cursor = await self._db.execute(
-                "SELECT enhanced_image_url FROM products "
-                "WHERE id = ? AND image_status = 'enhanced'",
-                (product_id,),
-            )
-            row = await cursor.fetchone()
-            return row[0] if row and row[0] else None
-        except Exception:
-            return None
-
     # ------------------------------------------------------------------
     # title_examples
     # ------------------------------------------------------------------
@@ -2145,16 +2146,14 @@ class SQLiteFallback:
             await self._db.execute(
                 """
                 INSERT INTO title_examples
-                    (id, scored_offer_id, product_title, category, price,
+                    (id, scored_offer_id, category_id,
                      generated_title, final_title, action, synced)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+                VALUES (?, ?, ?, ?, ?, ?, 0)
                 """,
                 (
                     example_id,
                     data.get("scored_offer_id"),
-                    data["product_title"],
-                    data.get("category"),
-                    data.get("price"),
+                    data.get("category_id"),
                     data["generated_title"],
                     data["final_title"],
                     data["action"],
@@ -2171,10 +2170,12 @@ class SQLiteFallback:
         try:
             cursor = await self._db.execute(
                 """
-                SELECT product_title, final_title, action
-                FROM title_examples
-                WHERE action IN ('approved', 'edited')
-                ORDER BY created_at DESC
+                SELECT p.title AS product_title, te.final_title, te.action
+                FROM title_examples te
+                LEFT JOIN scored_offers so ON so.id = te.scored_offer_id
+                LEFT JOIN products p ON p.id = so.product_id
+                WHERE te.action IN ('approved', 'edited')
+                ORDER BY te.created_at DESC
                 LIMIT ?
                 """,
                 (limit,),

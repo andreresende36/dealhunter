@@ -28,7 +28,6 @@ import structlog
 
 from src.config import settings
 from src.scraper.base_scraper import ScrapedProduct
-from src.utils.password import hash_password
 from .supabase_client import SupabaseClient
 from .sqlite_fallback import SQLiteFallback
 from .exceptions import SQLiteError, SupabaseError
@@ -63,6 +62,7 @@ class StorageManager:
         self._badge_cache: dict[str, str] = {}
         self._category_cache: dict[str, str] = {}
         self._marketplace_cache: dict[str, str] = {}
+        self._brand_cache: dict[str, str] = {}
         # Lookup de normalização: {nome_lower: nome_canonico}
         self._badge_canonical: dict[str, str] = {b.lower(): b for b in BADGES}
         self._category_canonical: dict[str, str] = {c.lower(): c for c in CATEGORIES}
@@ -236,7 +236,7 @@ class StorageManager:
         """
         Insere ou atualiza um produto em ambos os bancos.
 
-        Resolve badge_id e category_id antes de gravar (simétrico com batch).
+        Resolve badge_id, category_id e brand_id antes de gravar (simétrico com batch).
 
         Returns:
             UUID do produto (gerado pelo SQLite se Supabase indisponível).
@@ -248,6 +248,7 @@ class StorageManager:
         badge_id = await self.resolve_badge_id(product.badge)
         category_id = await self.resolve_category_id(product.category)
         marketplace_id = await self.resolve_marketplace_id(product.marketplace)
+        brand_id = await self.resolve_brand_id(product.brand)
 
         if self._using_supabase:
             try:
@@ -257,6 +258,7 @@ class StorageManager:
                     badge_id=badge_id,
                     category_id=category_id,
                     marketplace_id=marketplace_id,
+                    brand_id=brand_id,
                 )
                 # SQLite usa o mesmo UUID para manter FKs consistentes
                 await self._sqlite.upsert_product(
@@ -265,6 +267,7 @@ class StorageManager:
                     badge_id=badge_id,
                     category_id=category_id,
                     marketplace_id=marketplace_id,
+                    brand_id=brand_id,
                 )
                 return remote_id or ""
             except SupabaseError as exc:
@@ -280,6 +283,7 @@ class StorageManager:
             badge_id=badge_id,
             category_id=category_id,
             marketplace_id=marketplace_id,
+            brand_id=brand_id,
         )
         return result or ""
 
@@ -458,6 +462,7 @@ class StorageManager:
         marketplace_ids = await self._resolve_lookup_ids_batch(
             products, "marketplace", self.resolve_marketplace_id, require_value=False
         )
+        brand_ids = await self._resolve_lookup_ids_batch(products, "brand", self.resolve_brand_id)
 
         if self._using_supabase:
             try:
@@ -466,6 +471,7 @@ class StorageManager:
                     badge_ids=badge_ids,
                     category_ids=category_ids,
                     marketplace_ids=marketplace_ids,
+                    brand_ids=brand_ids,
                 )
                 # Espelha no SQLite com os mesmos UUIDs
                 await self._sqlite.upsert_products_batch(
@@ -474,6 +480,7 @@ class StorageManager:
                     badge_ids=badge_ids,
                     category_ids=category_ids,
                     marketplace_ids=marketplace_ids,
+                    brand_ids=brand_ids,
                 )
                 return remote_ids
             except SupabaseError as exc:
@@ -488,6 +495,7 @@ class StorageManager:
             badge_ids=badge_ids,
             category_ids=category_ids,
             marketplace_ids=marketplace_ids,
+            brand_ids=brand_ids,
         )
 
     async def add_price_history_batch(self, entries: list[dict]) -> bool:
@@ -813,26 +821,25 @@ class StorageManager:
     ) -> str:
         """Retorna o UUID do user pela tag. Cria se nao existir.
 
-        Se password for fornecida (plaintext), o hash bcrypt é calculado aqui
-        antes de persistir em qualquer banco.
+        Args password e ml_cookies são mantidos na assinatura por
+        compatibilidade com callers existentes, mas não são mais persistidos
+        (password_hash e ml_cookies foram movidos/removidos do schema).
         """
-        password_hash = hash_password(password) if password else None
-
         if self._using_supabase:
             try:
                 remote_id = await self._supabase.get_or_create_user(
-                    name, affiliate_tag, email, password_hash, ml_cookies
+                    name, affiliate_tag, email,
                 )
                 if remote_id:
                     await self._sqlite.get_or_create_user(
-                        name, affiliate_tag, email, password_hash, ml_cookies,
+                        name, affiliate_tag, email,
                         user_id=remote_id,
                     )
                     return remote_id
             except SupabaseError as exc:
                 logger.warning("supabase_user_failed", error=str(exc))
         return await self._sqlite.get_or_create_user(
-            name, affiliate_tag, email, password_hash, ml_cookies
+            name, affiliate_tag, email,
         ) or ""
 
     async def get_user_by_tag(self, affiliate_tag: str) -> dict | None:
@@ -915,50 +922,33 @@ class StorageManager:
         return result_ids
 
     # ------------------------------------------------------------------
-    # Image Worker
+    # brands
     # ------------------------------------------------------------------
 
-    async def get_pending_images(self, batch_size: int = 5) -> list[dict]:
-        """Retorna produtos pendentes de processamento de imagem."""
+    async def resolve_brand_id(self, name: str | None) -> str | None:
+        """Resolve o nome de uma marca para seu UUID, usando cache em memória."""
+        if not name:
+            return None
+        name = name.strip()
+        if not name:
+            return None
+        # Cache hit
+        if name in self._brand_cache:
+            return self._brand_cache[name]
+        # Cache miss → consulta + cria se necessário
+        brand_id: str | None = None
         if self._using_supabase:
             try:
-                return await self._supabase.get_pending_images(batch_size)
-            except SupabaseError:
-                pass
-        return await self._sqlite.get_pending_images(batch_size)
-
-    async def update_image_status(
-        self,
-        product_id: str,
-        status: str,
-        enhanced_url: str | None = None,
-    ) -> bool:
-        """Atualiza o status de processamento de imagem em ambos os bancos."""
-        local_ok = False
-        try:
-            local_ok = await self._sqlite.update_image_status(
-                product_id, status, enhanced_url
-            )
-        except SQLiteError as exc:
-            logger.warning("sqlite_update_image_status_failed", error=str(exc))
-
-        if self._using_supabase:
-            try:
-                return await self._supabase.update_image_status(
-                    product_id, status, enhanced_url
-                )
+                brand_id = await self._supabase.get_or_create_brand(name)
             except SupabaseError as exc:
-                logger.warning("supabase_update_image_status_failed", error=str(exc))
-        return local_ok
-
-    async def get_enhanced_image_url(self, product_id: str) -> str | None:
-        """Retorna a URL da imagem aprimorada, se existir."""
-        if self._using_supabase:
-            try:
-                return await self._supabase.get_enhanced_image_url(product_id)
-            except SupabaseError:
-                pass
-        return await self._sqlite.get_enhanced_image_url(product_id)
+                logger.warning("supabase_brand_resolve_failed", error=str(exc))
+        if brand_id is None:
+            brand_id = await self._sqlite.get_or_create_brand(name)
+        else:
+            await self._sqlite.ensure_brand_id(name, brand_id)
+        if brand_id:
+            self._brand_cache[name] = brand_id
+        return brand_id
 
     # ------------------------------------------------------------------
     # title_examples

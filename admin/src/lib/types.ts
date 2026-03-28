@@ -16,9 +16,10 @@ export interface Product {
   product_url: string;
   category_id: string | null;
   badge_id: string | null;
-  enhanced_image_url: string | null;
+  brand_id: string | null;
   first_seen_at: string;
   last_seen_at: string;
+  deleted_at: string | null;
 }
 
 export interface ScoredOffer {
@@ -36,9 +37,9 @@ export interface ScoredOffer {
 export interface SentOffer {
   id: string;
   scored_offer_id: string;
+  user_id: string | null;
   channel: "telegram" | "whatsapp";
   sent_at: string;
-  clicks: number;
   triggered_by: "auto" | "admin";
 }
 
@@ -57,6 +58,7 @@ export interface QueueItem {
   rating_stars: number | null;
   rating_count: number | null;
   installments_without_interest: boolean;
+  brand: string | null;
   category: string | null;
   badge: string | null;
   scored_offer_id: string;
@@ -79,6 +81,7 @@ export interface TopDeal {
   free_shipping: boolean;
   thumbnail_url: string | null;
   product_url: string;
+  brand: string | null;
   category: string | null;
   badge: string | null;
   final_score: number;
@@ -145,6 +148,7 @@ export interface OfferRow {
   queue_priority: number;
   admin_notes: string | null;
   // From joins
+  brand: string | null;
   category: string | null;
   badge: string | null;
 }

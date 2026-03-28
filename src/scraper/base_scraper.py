@@ -110,10 +110,10 @@ class ScrapedProduct:
     installment_count: Optional[int] = None  # Nº máximo de parcelas (ex: 10, 12)
     installment_value: Optional[float] = None  # Valor por parcela em BRL
     badge: str = ""  # Ex: "Oferta do dia", "Mais vendido"
-    brand: str = ""  # Marca extraída do card (ex: "GROWTH SUPPLEMENTS")
-    variations: str = ""  # Texto de variações (ex: "Disponível em 6 cores")
-    discount_type: str = ""  # "standard" | "pix" | ""
-    gender: str = "Sem gênero"  # Masculino | Feminino | Unissex | Sem gênero
+    brand: str | None = None  # Marca extraída do card (ex: "GROWTH SUPPLEMENTS"); None se não identificada
+    variations: str | None = None  # Texto de variações (ex: "Disponível em 6 cores"); None se ausente
+    discount_type: str | None = None  # "standard" | "pix" | None
+    gender: str = "gender_neutral"  # male | female | unisex | gender_neutral
 
     # Controle interno
     scraped_at: float = field(default_factory=time.time)

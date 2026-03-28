@@ -457,7 +457,7 @@ GENDER_RELEVANT_CATEGORIES = {
 
 # Keywords que determinam gênero de forma explícita no título
 _GENDER_KEYWORDS: dict[str, list[str]] = {
-    "Feminino": [
+    "female": [
         "feminino", "feminina", "femininos", "femininas",
         "mulher", "mulheres", "feminil",
         "menina", "meninas",
@@ -466,14 +466,14 @@ _GENDER_KEYWORDS: dict[str, list[str]] = {
         "saia", "vestido", "blusa",
         "feminino adulto",
     ],
-    "Masculino": [
+    "male": [
         "masculino", "masculina", "masculinos", "masculinas",
         "homem", "homens", "masculil",
         "menino", "meninos",
         "cueca", "bermuda masculina",
         "masculino adulto",
     ],
-    "Unissex": [
+    "unisex": [
         "unissex", "unisex",
     ],
 }
@@ -490,7 +490,19 @@ _GENDER_PATTERNS: list[tuple[str, re.Pattern]] = [
     for gender, words in _GENDER_KEYWORDS.items()
 ]
 
-_VALID_GENDERS = {"Masculino", "Feminino", "Unissex", "Sem gênero"}
+_VALID_GENDERS = {"male", "female", "unisex", "gender_neutral"}
+
+# Mapping from AI/legacy responses to standardized values
+_GENDER_NORMALIZE: dict[str, str] = {
+    "masculino": "male",
+    "feminino": "female",
+    "unissex": "unisex",
+    "sem gênero": "gender_neutral",
+    "male": "male",
+    "female": "female",
+    "unisex": "unisex",
+    "gender_neutral": "gender_neutral",
+}
 
 
 def get_product_gender(title: str, category: str) -> str | None:
@@ -498,12 +510,12 @@ def get_product_gender(title: str, category: str) -> str | None:
     Classifica o gênero de um produto por keywords.
 
     Retorna:
-    - "Sem gênero"  se a categoria não é gender-relevant
-    - "Feminino" | "Masculino" | "Unissex"  se keyword encontrada
+    - "gender_neutral"  se a categoria não é gender-relevant
+    - "female" | "male" | "unisex"  se keyword encontrada
     - None  se categoria é relevant mas não há keyword (precisa de IA)
     """
     if category not in GENDER_RELEVANT_CATEGORIES:
-        return "Sem gênero"
+        return "gender_neutral"
 
     for gender, pattern in _GENDER_PATTERNS:
         if pattern.search(title):
@@ -516,12 +528,12 @@ async def classify_gender_with_ai(title: str) -> str:
     """
     Classifica o gênero de um produto via LLM (google/gemini-2.5-flash).
     Chamado apenas quando keywords não determinaram o gênero.
-    Retorna um dos 4 valores válidos; fallback = "Unissex".
+    Retorna um dos 4 valores válidos; fallback = "unisex".
     """
     api_key = settings.openrouter.api_key
     if not api_key:
         logger.warning("openrouter_key_missing_gender", title=title)
-        return "Unissex"
+        return "unisex"
 
     prompt = _GENDER_USER_TEMPLATE.format(title=title)
 
@@ -546,19 +558,24 @@ async def classify_gender_with_ai(title: str) -> str:
             data = resp.json()
             raw = data["choices"][0]["message"]["content"]
             if not raw:
-                return "Unissex"
-            answer = raw.strip()
+                return "unisex"
+            answer = raw.strip().lower()
 
-            for valid in _VALID_GENDERS:
-                if valid.lower() == answer.lower() or answer.lower().startswith(valid.lower()):
-                    return valid
+            normalized = _GENDER_NORMALIZE.get(answer)
+            if normalized:
+                return normalized
+
+            # Try prefix matching for AI responses
+            for key, value in _GENDER_NORMALIZE.items():
+                if answer.startswith(key):
+                    return value
 
             logger.warning("ai_gender_mismatch", title=title, ai_answer=answer)
-            return "Unissex"
+            return "unisex"
 
     except Exception as e:
         logger.error("ai_gender_error", error=str(e), title=title)
-        return "Unissex"
+        return "unisex"
 
 
 class ProductClassifier:

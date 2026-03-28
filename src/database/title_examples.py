@@ -10,25 +10,26 @@ from dataclasses import dataclass
 
 @dataclass
 class TitleExampleData:
-    """Dados para salvar um exemplo de título no banco."""
+    """Dados para salvar um exemplo de título no banco.
 
-    product_title: str
+    product_title, category e price foram removidos da tabela title_examples
+    (deriváveis via scored_offer_id → scored_offers → products).
+    category_id é resolvido a partir do nome da categoria.
+    """
+
     generated_title: str
     final_title: str
     action: str  # "approved" | "edited" | "timeout"
-    category: str = ""
-    price: float = 0.0
     scored_offer_id: str | None = None
+    category_id: str | None = None
 
     def to_dict(self) -> dict:
         return {
-            "product_title": self.product_title,
             "generated_title": self.generated_title,
             "final_title": self.final_title,
             "action": self.action,
-            "category": self.category or None,
-            "price": self.price or None,
             "scored_offer_id": self.scored_offer_id,
+            "category_id": self.category_id,
         }
 
 

@@ -654,15 +654,15 @@ class MLScraper(BaseScraper):
         icon = item.select_one(SELECTORS["full_shipping_icon"])
         return icon is not None
 
-    def _parse_brand(self, item: Tag) -> str:
-        """Extrai a marca do card (.poly-component__brand)."""
+    def _parse_brand(self, item: Tag) -> str | None:
+        """Extrai a marca do card (.poly-component__brand). Retorna None se ausente."""
         tag = item.select_one(SELECTORS["brand"])
-        return tag.get_text(strip=True) if tag else ""
+        return tag.get_text(strip=True) if tag else None
 
-    def _parse_variations(self, item: Tag) -> str:
-        """Extrai texto de variações disponíveis (.poly-component__variations-text)."""
+    def _parse_variations(self, item: Tag) -> str | None:
+        """Extrai texto de variações disponíveis (.poly-component__variations-text). Retorna None se ausente."""
         tag = item.select_one(SELECTORS["variations"])
-        return tag.get_text(strip=True) if tag else ""
+        return tag.get_text(strip=True) if tag else None
 
     def _parse_installments(
         self, item: Tag
@@ -715,7 +715,7 @@ class MLScraper(BaseScraper):
 
         return sem_juros, count, None
 
-    def _parse_discount(self, item: Tag) -> tuple[float, str]:
+    def _parse_discount(self, item: Tag) -> tuple[float, str | None]:
         """Extrai percentual e tipo de desconto.
 
         Retorna (pct, type):
@@ -751,7 +751,7 @@ class MLScraper(BaseScraper):
                 ) else "standard"
                 return pct, dtype
 
-        return 0.0, ""
+        return 0.0, None
 
     def _parse_image_url(self, item: Tag) -> str:
         img_tag = item.select_one(SELECTORS["image"])

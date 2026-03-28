@@ -3,7 +3,7 @@ Classify the gender target of the following product. Respond with ONLY one of th
 Product Title: {title}
 
 Options:
-- Masculino
-- Feminino
-- Unissex
-- Sem gênero
+- male
+- female
+- unisex
+- gender_neutral

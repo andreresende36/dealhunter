@@ -24,7 +24,6 @@ from src.scraper.base_scraper import ScrapedProduct
 from src.distributor.affiliate_links import AffiliateLinkBuilder
 from src.distributor.message_formatter import MessageFormatter
 from src.distributor.telegram_bot import TelegramBot
-from src.image.image_storage import upload_to_supabase
 
 if TYPE_CHECKING:
     from src.database.storage_manager import StorageManager
@@ -93,14 +92,14 @@ def _offer_to_product(offer: UnsentOfferRow) -> ScrapedProduct:
         ),
         pix_price=_safe_number(pix_price_raw) if pix_price_raw else None,
         discount_pct=_safe_number(offer.get("discount_percent")),
-        discount_type=offer.get("discount_type") or "",
+        discount_type=offer.get("discount_type"),
         rating=_safe_number(offer.get("rating_stars")),
         review_count=int(_safe_number(offer.get("rating_count"))),
         category=offer.get("category") or "",
         image_url=offer.get("thumbnail_url") or "",
         free_shipping=bool(offer.get("free_shipping", False)),
         full_shipping=bool(offer.get("full_shipping", False)),
-        brand=offer.get("brand") or "",
+        brand=offer.get("brand"),
         installments_without_interest=bool(
             offer.get("installments_without_interest", False)
         ),
@@ -112,60 +111,9 @@ def _offer_to_product(offer: UnsentOfferRow) -> ScrapedProduct:
     )
 
 
-async def _select_and_upload_image(
-    storage: StorageManager,
-    product_id: str,
-    ml_id: str,
-    thumbnail_url: str,
-    force_new: bool = False,
-) -> tuple[str | None, bytes | None]:
-    """
-    Gera imagem lifestyle via IA e faz upload para Supabase Storage.
-    Reutiliza imagem existente se já houver uma selecionada para este produto.
-
-    Args:
-        force_new: Pula cache de imagem existente (usado no retry de validação).
-
-    Returns:
-        Tupla (URL pública, bytes da imagem) ou (None, None).
-    """
-    # Reutiliza imagem já processada — evita custo duplicado
-    if not force_new:
-        existing_url = await storage.get_enhanced_image_url(product_id)
-        if existing_url:
-            logger.info("image_reusing_existing", ml_id=ml_id, url=existing_url[:80])
-            return existing_url, None
-
-    from src.image.lifestyle_generator import generate_lifestyle_image
-
-    image_bytes: bytes | None = None
-    max_retries = settings.sender.image_max_retries
-    for attempt in range(1, max_retries + 1):
-        image_bytes = await generate_lifestyle_image(thumbnail_url)
-        if image_bytes:
-            break
-        logger.warning(
-            "lifestyle_retry",
-            ml_id=ml_id,
-            attempt=attempt,
-            max_retries=max_retries,
-        )
-
-    if not image_bytes:
-        logger.warning("image_selection_no_bytes", ml_id=ml_id)
-        return None, None
-
-    # Upload para Supabase Storage
-    public_url = await upload_to_supabase(product_id, image_bytes, "jpg")
-    if public_url:
-        await storage.update_image_status(
-            product_id, "enhanced", enhanced_url=public_url
-        )
-        logger.info("image_uploaded", ml_id=ml_id, source="lifestyle", url=public_url[:80])
-        return public_url, image_bytes
-
-    logger.warning("image_upload_failed", ml_id=ml_id)
-    return None, None
+    # TODO: reativar quando image enhancement for reintegrado
+    # async def _select_and_upload_image(...) foi removido.
+    # O sistema usa a imagem padrão do Mercado Livre (thumbnail_url) por enquanto.
 
 
 # ---------------------------------------------------------------------------
@@ -279,12 +227,9 @@ async def _run_title_review(
     if result and result.action != "rejected":
         try:
             example_data = TitleExampleData(
-                product_title=product_title,
                 generated_title=result.generated_title,
                 final_title=catchy_title or result.final_title,
                 action=result.action,
-                category=category,
-                price=current_price,
                 scored_offer_id=scored_offer_id,
             )
             await storage.save_title_example(example_data.to_dict())
@@ -399,15 +344,9 @@ async def send_next_offer(
         if should_abort:
             return False
 
-    # 5. Selecionar melhor imagem real do produto
+    # 5. Usar imagem padrão do Mercado Livre (thumbnail_url)
+    # TODO: reativar quando image enhancement for reintegrado
     enhanced_image_url: str | None = None
-    if thumbnail_url:
-        enhanced_image_url, _ = await _select_and_upload_image(
-            storage, product_id, ml_id, thumbnail_url,
-        )
-
-    if not enhanced_image_url:
-        logger.info("sending_with_original_thumbnail", ml_id=ml_id)
 
     # 6. Formatar mensagem (Style Guide v3)
     msg = formatter.format(
