@@ -1,6 +1,6 @@
 -- =============================================================================
 -- Crivo — Schema PostgreSQL (Supabase)
--- Snapshot do schema final após todas as migrations (001–032).
+-- Snapshot do schema final após todas as migrations (001–040).
 -- Este arquivo é documentação de referência e criação do zero.
 -- Para alterações incrementais use supabase/migrations/.
 -- =============================================================================
@@ -102,7 +102,8 @@ CREATE TABLE IF NOT EXISTS products (
                                                 CONSTRAINT chk_products_gender
                                                 CHECK (gender IN ('male', 'female', 'unisex', 'gender_neutral')),
     thumbnail_url                 TEXT          DEFAULT '',
-    product_url                   TEXT          NOT NULL DEFAULT '',
+    product_url                   TEXT          NOT NULL DEFAULT ''
+                                                CONSTRAINT chk_products_product_url CHECK (product_url <> ''),
     category_id                   UUID          REFERENCES categories(id),
     badge_id                      UUID          REFERENCES badges(id),
     marketplace_id                UUID          REFERENCES marketplaces(id),
@@ -112,7 +113,7 @@ CREATE TABLE IF NOT EXISTS products (
     deleted_at                    TIMESTAMPTZ
 );
 
-CREATE INDEX IF NOT EXISTS idx_products_ml_id           ON products(ml_id);
+-- idx_products_ml_id removido (P19): o UNIQUE em ml_id já cria seu próprio índice
 CREATE INDEX IF NOT EXISTS idx_products_discount        ON products(discount_percent DESC);
 CREATE INDEX IF NOT EXISTS idx_products_last_seen       ON products(last_seen_at DESC);
 CREATE INDEX IF NOT EXISTS idx_products_category_id     ON products(category_id);
@@ -136,20 +137,47 @@ CREATE TRIGGER trigger_products_on_update
     FOR EACH ROW EXECUTE FUNCTION fn_products_on_update();
 
 -- =============================================================================
--- 6. price_history
+-- 6. price_history (particionada por mês — P17)
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS price_history (
-    id              UUID          DEFAULT uuid_generate_v4() PRIMARY KEY,
+    id              UUID          DEFAULT uuid_generate_v4(),
     product_id      UUID          NOT NULL REFERENCES products(id) ON DELETE CASCADE,
     price           DECIMAL(10,2) NOT NULL,
     original_price  DECIMAL(10,2),
     pix_price       DECIMAL(10,2),
-    recorded_at     TIMESTAMPTZ   DEFAULT NOW()
-);
+    recorded_at     TIMESTAMPTZ   DEFAULT NOW(),
+    PRIMARY KEY (id, recorded_at)
+) PARTITION BY RANGE (recorded_at);
 
-CREATE INDEX IF NOT EXISTS idx_price_history_product_id        ON price_history(product_id);
-CREATE INDEX IF NOT EXISTS idx_price_history_recorded_at       ON price_history(recorded_at DESC);
-CREATE INDEX IF NOT EXISTS idx_price_history_product_recorded  ON price_history(product_id, recorded_at DESC);
+-- Partições mensais (criar novas mensalmente via fn_create_price_history_partition)
+CREATE TABLE IF NOT EXISTS price_history_y2026m03 PARTITION OF price_history FOR VALUES FROM ('2026-03-01') TO ('2026-04-01');
+CREATE TABLE IF NOT EXISTS price_history_y2026m04 PARTITION OF price_history FOR VALUES FROM ('2026-04-01') TO ('2026-05-01');
+CREATE TABLE IF NOT EXISTS price_history_y2026m05 PARTITION OF price_history FOR VALUES FROM ('2026-05-01') TO ('2026-06-01');
+CREATE TABLE IF NOT EXISTS price_history_y2026m06 PARTITION OF price_history FOR VALUES FROM ('2026-06-01') TO ('2026-07-01');
+CREATE TABLE IF NOT EXISTS price_history_default  PARTITION OF price_history DEFAULT;
+
+CREATE INDEX IF NOT EXISTS idx_price_history_product_id       ON price_history(product_id);
+CREATE INDEX IF NOT EXISTS idx_price_history_recorded_at      ON price_history(recorded_at DESC);
+CREATE INDEX IF NOT EXISTS idx_price_history_product_recorded ON price_history(product_id, recorded_at DESC);
+CREATE INDEX IF NOT EXISTS idx_price_history_price            ON price_history(price);
+
+-- Função para criação automática de partição futura (chamar via pg_cron ou FastAPI)
+CREATE OR REPLACE FUNCTION fn_create_price_history_partition()
+RETURNS VOID AS $$
+DECLARE
+    partition_date DATE := DATE_TRUNC('month', NOW() + INTERVAL '2 months');
+    partition_name TEXT := 'price_history_y' || TO_CHAR(partition_date, 'YYYY') || 'm' || TO_CHAR(partition_date, 'MM');
+    start_date TEXT := TO_CHAR(partition_date, 'YYYY-MM-DD');
+    end_date   TEXT := TO_CHAR(partition_date + INTERVAL '1 month', 'YYYY-MM-DD');
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_class WHERE relname = partition_name) THEN
+        EXECUTE FORMAT(
+            'CREATE TABLE %I PARTITION OF price_history FOR VALUES FROM (%L) TO (%L)',
+            partition_name, start_date, end_date
+        );
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
 
 -- =============================================================================
 -- 7. scored_offers
@@ -166,6 +194,8 @@ CREATE TABLE IF NOT EXISTS scored_offers (
     score_override  INTEGER,
     admin_notes     TEXT,
     updated_at      TIMESTAMPTZ DEFAULT NOW(),
+    -- NOTA (P15): UNIQUE em product_id é intencional — o sistema faz upsert de score.
+    -- Histórico de scores não é mantido por decisão de negócio.
     CONSTRAINT scored_offers_product_id_unique UNIQUE (product_id)
 );
 
@@ -220,14 +250,15 @@ CREATE TABLE IF NOT EXISTS users (
     email           TEXT,
     created_at      TIMESTAMPTZ DEFAULT NOW(),
     updated_at      TIMESTAMPTZ DEFAULT NOW(),
-    deleted_at      TIMESTAMPTZ
+    deleted_at      TIMESTAMPTZ,
+    CONSTRAINT uq_users_affiliate_tag UNIQUE (affiliate_tag)  -- P01
 );
 
 CREATE TRIGGER trigger_users_updated_at
     BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION fn_set_updated_at();
 
-CREATE INDEX IF NOT EXISTS idx_users_affiliate_tag ON users(affiliate_tag);
+-- idx_users_affiliate_tag não criado (P01): o UNIQUE acima cria seu próprio índice
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email  ON users(email) WHERE email IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_users_deleted_at    ON users(deleted_at) WHERE deleted_at IS NOT NULL;
 
@@ -258,7 +289,8 @@ CREATE TABLE IF NOT EXISTS affiliate_links (
     ml_link_id      TEXT,
     created_at      TIMESTAMPTZ DEFAULT NOW(),
     updated_at      TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE (product_id, user_id)
+    UNIQUE (product_id, user_id),
+    CONSTRAINT uq_affiliate_links_short_url UNIQUE (short_url)  -- P14
 );
 
 CREATE TRIGGER trigger_affiliate_links_updated_at
@@ -400,19 +432,25 @@ WHERE so.status = 'approved'
   )
 ORDER BY so.queue_priority DESC, COALESCE(so.score_override, so.final_score) DESC;
 
--- Resumo das últimas 24h (KPIs do dashboard)
-CREATE OR REPLACE VIEW vw_last_24h_summary AS
+-- Resumo das últimas 24h (KPIs do dashboard) — Materialized View (P20)
+-- Atualizada a cada 15 min via fn_refresh_mv_summary() (pg_cron ou FastAPI)
+CREATE MATERIALIZED VIEW IF NOT EXISTS mv_last_24h_summary AS
 SELECT
     (SELECT COUNT(*) FROM products      WHERE last_seen_at >= NOW() - INTERVAL '24 hours' AND deleted_at IS NULL) AS products_scraped,
     (SELECT COUNT(*) FROM scored_offers WHERE scored_at    >= NOW() - INTERVAL '24 hours') AS offers_scored,
-    (SELECT COUNT(*) FROM scored_offers WHERE scored_at    >= NOW() - INTERVAL '24 hours'
-                                         AND status = 'approved')                          AS offers_approved,
+    (SELECT COUNT(*) FROM scored_offers WHERE scored_at    >= NOW() - INTERVAL '24 hours' AND status = 'approved') AS offers_approved,
     (SELECT COUNT(*) FROM sent_offers   WHERE sent_at      >= NOW() - INTERVAL '24 hours') AS offers_sent,
-    (SELECT ROUND(AVG(final_score), 1)  FROM scored_offers
-                                        WHERE scored_at    >= NOW() - INTERVAL '24 hours') AS avg_score,
-    (SELECT MAX(discount_percent)       FROM products
-                                        WHERE last_seen_at >= NOW() - INTERVAL '24 hours'
-                                          AND deleted_at IS NULL)                          AS max_discount_pct;
+    (SELECT ROUND(AVG(final_score), 1)  FROM scored_offers WHERE scored_at >= NOW() - INTERVAL '24 hours') AS avg_score,
+    (SELECT MAX(discount_percent)       FROM products      WHERE last_seen_at >= NOW() - INTERVAL '24 hours' AND deleted_at IS NULL) AS max_discount_pct;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_last_24h_summary ON mv_last_24h_summary ((1));
+
+CREATE OR REPLACE FUNCTION fn_refresh_mv_summary()
+RETURNS VOID AS $$
+BEGIN
+    REFRESH MATERIALIZED VIEW CONCURRENTLY mv_last_24h_summary;
+END;
+$$ LANGUAGE plpgsql;
 
 -- Top 20 deals ativos nas últimas 6h
 CREATE OR REPLACE VIEW vw_top_deals AS
@@ -445,3 +483,56 @@ WHERE p.last_seen_at >= NOW() - INTERVAL '6 hours'
   AND so.status = 'approved'
 ORDER BY so.final_score DESC, p.discount_percent DESC
 LIMIT 20;
+
+-- =============================================================================
+-- 15. scored_offer_transitions (P09)
+-- Audit trail automático de mudanças de status via trigger.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS scored_offer_transitions (
+    id                UUID        DEFAULT uuid_generate_v4() PRIMARY KEY,
+    scored_offer_id   UUID        NOT NULL REFERENCES scored_offers(id) ON DELETE CASCADE,
+    from_status       TEXT,
+    to_status         TEXT        NOT NULL CHECK (to_status IN ('pending', 'approved', 'rejected')),
+    changed_by        TEXT,
+    notes             TEXT,
+    created_at        TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_sot_scored_offer_id ON scored_offer_transitions(scored_offer_id);
+CREATE INDEX IF NOT EXISTS idx_sot_created_at      ON scored_offer_transitions(created_at DESC);
+
+ALTER TABLE scored_offer_transitions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "sot_service_only" ON scored_offer_transitions FOR ALL
+    USING (auth.role() = 'service_role')
+    WITH CHECK (auth.role() = 'service_role');
+
+CREATE OR REPLACE FUNCTION fn_scored_offer_status_change()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF OLD.status IS DISTINCT FROM NEW.status THEN
+        INSERT INTO scored_offer_transitions (scored_offer_id, from_status, to_status)
+        VALUES (NEW.id, OLD.status, NEW.status);
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_scored_offer_status_change
+    AFTER UPDATE OF status ON scored_offers
+    FOR EACH ROW EXECUTE FUNCTION fn_scored_offer_status_change();
+
+-- =============================================================================
+-- Automações (P18)
+-- =============================================================================
+
+-- Limpeza de logs com mais de 90 dias (chamar via pg_cron ou FastAPI diariamente)
+CREATE OR REPLACE FUNCTION fn_cleanup_old_system_logs()
+RETURNS INTEGER AS $$
+DECLARE
+    deleted_count INTEGER;
+BEGIN
+    DELETE FROM system_logs WHERE created_at < NOW() - INTERVAL '90 days';
+    GET DIAGNOSTICS deleted_count = ROW_COUNT;
+    RETURN deleted_count;
+END;
+$$ LANGUAGE plpgsql;

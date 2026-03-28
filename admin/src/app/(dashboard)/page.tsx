@@ -165,7 +165,7 @@ export default function DashboardPage() {
     try {
       // Summary from view
       const { data: summaryData } = await supabase
-        .from("vw_last_24h_summary")
+        .from("mv_last_24h_summary")
         .select("*")
         .single();
       if (summaryData) setSummary(summaryData);

@@ -467,8 +467,8 @@ class SQLiteFallback:
           )
         ORDER BY so.queue_priority DESC, COALESCE(so.score_override, so.final_score) DESC;
 
-        DROP VIEW IF EXISTS vw_last_24h_summary;
-        CREATE VIEW vw_last_24h_summary AS
+        DROP VIEW IF EXISTS mv_last_24h_summary;
+        CREATE VIEW mv_last_24h_summary AS
         SELECT
             (SELECT COUNT(*) FROM products
              WHERE last_seen_at >= datetime('now', '-24 hours')

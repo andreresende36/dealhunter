@@ -87,7 +87,7 @@ export interface TopDeal {
   final_score: number;
 }
 
-/** Linha da view vw_last_24h_summary */
+/** Linha da materialized view mv_last_24h_summary */
 export interface DailySummary {
   products_scraped: number;
   offers_scored: number;
